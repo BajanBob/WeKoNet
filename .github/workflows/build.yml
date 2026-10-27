@@ -127,6 +127,13 @@ jobs:
         env:
           CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+      - name: Launch test — start the packaged Windows app
+        shell: bash
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1
+          set +e; node scripts/smoke-electron.mjs release/win-unpacked/WeKoNet.exe 2>&1 | tee smoke.log; s=${PIPESTATUS[0]}
+          if [ $s -ne 0 ]; then echo "::error title=Launch test failed::$(tail -n 40 smoke.log | tr -d '\r' | sed -e 's/%/%25/g' | sed -e ':a;N;$!ba;s/\n/%0A/g')"; fi
+          exit $s
       - uses: actions/upload-artifact@v4
         with: { name: wekonet-windows, path: release/*.exe }
 
@@ -143,6 +150,13 @@ jobs:
         run: |
           set +e; npm run dist:pi 2>&1 | tee build.log; s=${PIPESTATUS[0]}
           if [ $s -ne 0 ]; then echo "::error title=Build failed::$(tail -n 60 build.log | tr -d '\r' | sed -e 's/%/%25/g' | sed -e ':a;N;$!ba;s/\n/%0A/g')"; fi
+          exit $s
+      - name: Launch test — start the packaged Raspberry Pi app
+        shell: bash
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1
+          set +e; xvfb-run -a node scripts/smoke-electron.mjs release/linux-arm64-unpacked/wekonet 2>&1 | tee smoke.log; s=${PIPESTATUS[0]}
+          if [ $s -ne 0 ]; then echo "::error title=Launch test failed::$(tail -n 40 smoke.log | tr -d '\r' | sed -e 's/%/%25/g' | sed -e ':a;N;$!ba;s/\n/%0A/g')"; fi
           exit $s
       - uses: actions/upload-artifact@v4
         with:
@@ -164,6 +178,13 @@ jobs:
         run: |
           set +e; npm run dist:linux 2>&1 | tee build.log; s=${PIPESTATUS[0]}
           if [ $s -ne 0 ]; then echo "::error title=Build failed::$(tail -n 60 build.log | tr -d '\r' | sed -e 's/%/%25/g' | sed -e ':a;N;$!ba;s/\n/%0A/g')"; fi
+          exit $s
+      - name: Launch test — start the packaged Linux app
+        shell: bash
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1
+          set +e; xvfb-run -a node scripts/smoke-electron.mjs release/linux-unpacked/wekonet 2>&1 | tee smoke.log; s=${PIPESTATUS[0]}
+          if [ $s -ne 0 ]; then echo "::error title=Launch test failed::$(tail -n 40 smoke.log | tr -d '\r' | sed -e 's/%/%25/g' | sed -e ':a;N;$!ba;s/\n/%0A/g')"; fi
           exit $s
       - uses: actions/upload-artifact@v4
         with:

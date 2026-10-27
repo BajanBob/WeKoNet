@@ -25,8 +25,8 @@ function csp(env) {
     "form-action 'none'",
     "require-trusted-types-for 'script'",
     "trusted-types wekonet default dompurify",
-    'upgrade-insecure-requests',
-  ].join('; ');
+    env.VITE_E2E_LOCAL === '1' ? null : 'upgrade-insecure-requests',
+  ].filter(Boolean).join('; ');
 }
 
 export default defineConfig(({ mode }) => {
