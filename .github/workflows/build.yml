@@ -13,7 +13,7 @@ permissions:
 
 env:
   NODE_VERSION: 22
-  VITE_RELAY_URL: ${{ vars.VITE_RELAY_URL || 'wss://relay.wekonet.app/ws' }}
+  VITE_RELAY_URL: ${{ vars.VITE_RELAY_URL || 'wss://wekonet-relay.onrender.com/ws' }}
   VITE_APP_BASE: ${{ vars.VITE_APP_BASE || 'https://wekonet.app/b/' }}
   VITE_TILE_URL: ${{ vars.VITE_TILE_URL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png' }}
   VITE_ICE_SERVERS: ${{ secrets.VITE_ICE_SERVERS }}

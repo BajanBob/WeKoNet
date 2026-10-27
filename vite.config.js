@@ -4,7 +4,7 @@ import { defineConfig, loadEnv } from 'vite';
 // can only reach its own relay and tile server. Injected only into production
 // builds (Vite's dev server needs inline styles for hot reload).
 function csp(env) {
-  const relay = new URL((env.VITE_RELAY_URL || 'wss://relay.wekonet.app/ws').replace(/^ws/, 'http'));
+  const relay = new URL((env.VITE_RELAY_URL || 'wss://wekonet-relay.onrender.com/ws').replace(/^ws/, 'http'));
   const relayOrigin = `${relay.protocol === 'https:' ? 'wss' : 'ws'}://${relay.host}`;
   const tiles = new URL((env.VITE_TILE_URL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png').replace(/\{[a-z]\}/g, '0'));
   return [
