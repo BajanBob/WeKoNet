@@ -33,6 +33,7 @@ jobs:
       - name: Enforce CSP / no inline script / no unsafe DOM sinks
         run: node scripts/check-csp.mjs
       - name: Browser attack tests (3-person call, MITM relay, injection, outage, offline SOS)
+        shell: bash
         env:
           VITE_RELAY_URL: ws://127.0.0.1:8787/ws
           VITE_APP_BASE: http://127.0.0.1:5173/b/
@@ -40,7 +41,9 @@ jobs:
         run: |
           npx vite build --outDir dist-e2e
           npx playwright install --with-deps chromium
-          WEKONET_SITE=dist-e2e npm run test:e2e
+          set +e; WEKONET_SITE=dist-e2e npm run test:e2e 2>&1 | tee attack.log; st=${PIPESTATUS[0]}
+          if [ $st -ne 0 ]; then echo "::error title=Browser attack tests failed::$(grep -vE '^\s*$' attack.log | tail -n 60 | tr -d '\r' | sed -e 's/%/%25/g' | sed -e ':a;N;$!ba;s/\n/%0A/g')"; fi
+          exit $st
       - uses: actions/upload-artifact@v4
         with: { name: wekonet-web, path: dist }
 
