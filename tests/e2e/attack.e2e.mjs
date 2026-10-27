@@ -79,8 +79,10 @@ const browser = await chromium.launch({
 const results = [];
 const live = new Set();
 const problems = [];
+let current = '';
 async function scenario(name, fn) {
   if (ONLY && !ONLY.test(name)) return;
+  current = name.slice(0, 32);
   const t0 = Date.now();
   try { await fn(); results.push(['PASS', name, Date.now() - t0]); console.log(`✓ ${name}`); }
   catch (e) {
@@ -97,7 +99,7 @@ async function person(tag, lat = 13.1, lon = -59.6) {
   const page = await ctx.newPage();
   page.on('pageerror', (e) => problems.push(`[${tag}] pageerror: ${e.message}`));
   if (process.env.VERBOSE) page.on('console', (m) => console.log(`    [${tag}] ${m.type()}: ${m.text().slice(0, 200)}`));
-  page.on('console', (m) => { if (m.type() === 'error' && !/Failed to load resource|WebSocket connection/.test(m.text())) problems.push(`[${tag}] console: ${m.text().slice(0, 200)}`); });
+  page.on('console', (m) => { if (m.type() === 'error' && !/Failed to load resource|WebSocket connection/.test(m.text())) problems.push(`[${current} · ${tag}] console: ${m.text().slice(0, 160)} @ ${(m.location()?.url || '').split('/').pop()}:${m.location()?.lineNumber ?? ''}`); });
   page.on('dialog', (d) => { problems.push(`[${tag}] JS dialog opened: ${d.message()}`); d.dismiss(); });
   await page.goto(ORIGIN + '/');
   await page.waitForFunction(() => /^WKN-/.test(document.querySelector('#my-id')?.textContent || ''));
@@ -351,6 +353,10 @@ if (relay) relay.close();
 web.close();
 console.log('\n──────── results ────────');
 for (const [s, n, ms, err] of results) console.log(`${s}  ${n}  (${(ms / 1000).toFixed(1)} s)${err ? `\n      ${err.split('\n')[0]}` : ''}`);
-if (problems.length) { console.log('\nPage errors / dialogs:'); for (const p of problems) console.log('  ' + p); }
+if (problems.length) {
+  const counts = new Map(); for (const p of problems) counts.set(p, (counts.get(p) || 0) + 1);
+  console.log('\nPage errors / dialogs (deduplicated):');
+  for (const [p, n] of counts) console.log(`  ${n > 1 ? `${n}× ` : ''}${p}`);
+}
 const failed = results.filter((r) => r[0] === 'FAIL').length + problems.filter((p) => /pageerror|dialog/.test(p)).length;
 process.exit(failed ? 1 : 0);
