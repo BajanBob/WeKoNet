@@ -8,9 +8,9 @@ export const CONFIG = {
   appBase: env.VITE_APP_BASE || 'https://wekonet.app/b/',
   tileUrl: env.VITE_TILE_URL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
   iceServers: JSON.parse(env.VITE_ICE_SERVERS || JSON.stringify([
-    // Public STUN servers help two devices find each other. For calls that
-    // must work on every network (and for "Hide my IP"), add your own TURN
-    // server through the VITE_ICE_SERVERS secret.
-    { urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] },
+    // STUN helps two devices find each other. TURN servers (for every network
+    // and for "Hide my IP") are handed out by the relay per call — see
+    // CF_TURN_KEY_ID / CF_TURN_API_TOKEN in render.yaml.
+    { urls: ['stun:stun.cloudflare.com:3478'] },
   ])),
 };

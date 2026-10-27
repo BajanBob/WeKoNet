@@ -1,13 +1,12 @@
-# One-click deploy of the WeKoNet relay on Render.com:
-#   https://render.com/deploy?repo=https://github.com/BajanBob/WeKoNet
-# After it is live, set the GitHub Actions variable
-#   VITE_RELAY_URL = wss://<your-service>.onrender.com/ws
-# and rebuild the apps.
+# WeKoNet on Render.com — the relay plus the web app / beacon landing page.
+#   Deploy: https://render.com/deploy?repo=https://github.com/BajanBob/WeKoNet
+# The relay runs on the always-on "starter" plan ($7/month) so SOS mail and
+# "Keep live" rooms are not lost when it would otherwise sleep.
 services:
   - type: web
     name: wekonet-relay
     runtime: docker
-    plan: free            # free sleeps when idle; "starter" stays always on
+    plan: starter
     dockerfilePath: ./deploy/Dockerfile.relay
     dockerContext: .
     healthCheckPath: /healthz
@@ -16,4 +15,47 @@ services:
       - key: TRUST_PROXY
         value: "1"
       - key: ALLOWED_ORIGINS
-        value: https://wekonet.app,capacitor://localhost,https://localhost,app://wekonet
+        value: https://wekonet.app,https://wekonet-web.onrender.com,capacitor://localhost,https://localhost,app://wekonet
+      # Cloudflare TURN (Cloudflare dashboard → Realtime → TURN Server → create key).
+      # Render asks for these two values when the blueprint syncs; they never go into the app.
+      - key: CF_TURN_KEY_ID
+        sync: false
+      - key: CF_TURN_API_TOKEN
+        sync: false
+
+  # Web app at https://wekonet.app — beacon links (https://wekonet.app/b/#…)
+  # open here when the app is not installed, and /.well-known/assetlinks.json
+  # lets Android open them straight in the app.
+  - type: web
+    name: wekonet-web
+    runtime: static
+    buildCommand: npm install --no-audit --no-fund && npm run build
+    staticPublishPath: ./dist
+    domains:
+      - wekonet.app
+    envVars:
+      - key: ELECTRON_SKIP_BINARY_DOWNLOAD
+        value: "1"
+      - key: VITE_RELAY_URL
+        value: wss://wekonet-relay.onrender.com/ws
+      - key: VITE_APP_BASE
+        value: https://wekonet.app/b/
+    headers:
+      - path: /*
+        name: Content-Security-Policy
+        value: "frame-ancestors 'none'"
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: no-referrer
+      - path: /*
+        name: Strict-Transport-Security
+        value: max-age=63072000; includeSubDomains
+      - path: /*
+        name: Permissions-Policy
+        value: camera=(self), microphone=(self), geolocation=(self), payment=(), usb=()
+      - path: /*
+        name: Cross-Origin-Opener-Policy
+        value: same-origin

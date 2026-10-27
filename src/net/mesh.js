@@ -101,8 +101,13 @@ export class CallSession extends EventTarget {
   }
 
   // ---------- room / handshake ----------
-  async #onJoined({ peer, peers, deadline }) {
+  async #onJoined({ peer, peers, deadline, ice }) {
     this.me = peer; this.deadline = deadline;
+    // TURN servers + short-lived credentials handed out by the relay (Cloudflare).
+    if (Array.isArray(ice) && ice.length) this.iceServers = [...ice];
+    if (this.hideIp && !this.iceServers.some((s) => [].concat(s.urls).some((u) => /^turns?:/.test(u)))) {
+      this.emit('warning', { message: '“Hide my IP” needs a TURN server, which this relay does not provide yet — your IP address may be visible to the other person.' });
+    }
     this.emit('room', { me: peer, deadline, linger: this.payload.linger });
     if (deadline) this.deadlineTimer = setTimeout(() => this.end(false), Math.max(0, deadline - Date.now()));
     // Newcomer initiates a handshake with everyone already in the room.

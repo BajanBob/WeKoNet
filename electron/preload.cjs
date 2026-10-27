@@ -5,7 +5,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('wekonetDesktop', Object.freeze({
   onBeacon(cb) {
     ipcRenderer.on('wekonet:beacon', (_e, url) => {
-      if (typeof url === 'string' && /^wekonet:\/\/b#v1\./.test(url)) cb(url);
+      if (typeof url === 'string' && /^wekonet:\/\/b#(?:v1|v2|s)\./.test(url)) cb(url);
     });
   },
   onPurge(cb) { ipcRenderer.on('wekonet:purge', () => cb()); },

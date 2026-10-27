@@ -20,9 +20,41 @@ const MAILBOX_TTL = 24 * 3600e3;
 const MAILBOX_MAX = 50;
 const MAX_PEERS = 3;
 
+// ---------------- TURN (Cloudflare) ----------------
+// When CF_TURN_KEY_ID + CF_TURN_API_TOKEN are set, the relay hands short-lived
+// Cloudflare TURN credentials to people who join a room, so calls connect on
+// any network and "Hide my IP" works. No TURN password is ever built into the app.
+const CF_TURN_KEY_ID = process.env.CF_TURN_KEY_ID || '';
+const CF_TURN_API_TOKEN = process.env.CF_TURN_API_TOKEN || '';
+const TURN_TTL_S = 24 * 3600;      // credentials stay valid at least ~23 h after they are handed out
+let turnIce = null;
+async function refreshTurn() {
+  if (!CF_TURN_KEY_ID || !CF_TURN_API_TOKEN) return;
+  try {
+    const r = await fetch(`https://rtc.live.cloudflare.com/v1/turn/keys/${encodeURIComponent(CF_TURN_KEY_ID)}/credentials/generate-ice-servers`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${CF_TURN_API_TOKEN}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ ttl: TURN_TTL_S }),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json();
+    const list = (Array.isArray(j.iceServers) ? j.iceServers : [j.iceServers]).filter((s) => s && s.urls);
+    turnIce = list.map((s) => ({
+      urls: [].concat(s.urls).filter((u) => !/:53(\?|$)/.test(u)), // port 53 is blocked by browsers
+      ...(s.username ? { username: s.username, credential: s.credential } : {}),
+    })).filter((s) => s.urls.length);
+  } catch (e) {
+    console.error(`TURN credentials refresh failed (${e.message})`);
+  }
+}
+export const turnConfigured = () => !!turnIce;
+
 const rooms = new Map();     // roomTag → { hash, max, linger, exp, deadline, peers: Map<peerId, conn>, started }
 const mailboxes = new Map(); // boxId → [{ t, data }]
 const subs = new Map();      // boxId → Set<conn>
+const stash = new Map();     // short-link id → { data, exp }  (sealed beacons; the relay cannot open them)
+const stashByIp = new Map(); // ip → { n, since }
+const STASH_MAX = 50000, STASH_PER_IP_HOUR = 30, STASH_MAX_TTL = 125 * 60e3;
 const ipCount = new Map();
 
 const okId = (s, min = 16, max = 64) => typeof s === 'string' && s.length >= min && s.length <= max && /^[A-Za-z0-9_-]+$/.test(s);
@@ -111,7 +143,7 @@ function joinRoom(c, room, r) {
     // 'end' = no clock: the room lives while anyone is in it, dies when the last leaves.
     r.deadline = r.linger === 'end' ? Infinity : r.started + LINGER[r.linger];
   }
-  c.send({ op: 'joined', peer, peers: others, deadline: Number.isFinite(r.deadline) ? r.deadline : null });
+  c.send({ op: 'joined', peer, peers: others, deadline: Number.isFinite(r.deadline) ? r.deadline : null, ...(turnIce ? { ice: turnIce } : {}) });
   for (const o of others) r.peers.get(o).send({ op: 'peer-joined', peer });
 }
 
@@ -185,6 +217,25 @@ function handle(c, m) {
       mailboxes.set(m.box, q);
       return c.send({ op: 'posted', box: m.box });
     }
+    case 'stash': { // park a sealed beacon for a short link until it expires
+      if (!okId(m.id, 16, 16) || typeof m.data !== 'string' || m.data.length > 3000 || !/^[A-Za-z0-9_-]+$/.test(m.data)) throw 0;
+      const now = Date.now();
+      const exp = Math.min(Number(m.exp) || 0, now + STASH_MAX_TTL);
+      if (exp <= now) throw 0;
+      const q = stashByIp.get(c.ip) || { n: 0, since: now };
+      if (now - q.since > 3600e3) { q.n = 0; q.since = now; }
+      if (q.n >= STASH_PER_IP_HOUR || stash.size >= STASH_MAX) return c.send({ op: 'error', code: 'busy', id: m.id });
+      if (stash.has(m.id)) throw 0;
+      q.n++; stashByIp.set(c.ip, q);
+      stash.set(m.id, { data: m.data, exp });
+      return c.send({ op: 'stashed', id: m.id });
+    }
+    case 'fetch': {
+      if (!okId(m.id, 16, 16)) throw 0;
+      const e = stash.get(m.id);
+      if (!e || e.exp < Date.now()) return c.send({ op: 'error', code: 'no-such-link', id: m.id });
+      return c.send({ op: 'stash', id: m.id, data: e.data });
+    }
     case 'ping': return c.send({ op: 'pong' });
     default: throw 0;
   }
@@ -193,6 +244,8 @@ function handle(c, m) {
 // ---------------- housekeeping ----------------
 function sweep() {
   const now = Date.now();
+  for (const [k, e] of stash) if (e.exp < now) stash.delete(k);
+  for (const [ip, q] of stashByIp) if (now - q.since > 3600e3) stashByIp.delete(ip);
   for (const [k, r] of rooms) {
     const dead = (!r.started && now > r.exp && r.peers.size === 0) ||
                  (r.started && r.peers.size === 0 && (r.linger === 'end' || now > r.deadline));
@@ -255,6 +308,7 @@ export function startRelay({ port = PORT, host = HOST } = {}) {
   server.close = (cb) => { for (const s of sockets) s.destroy(); return closeHttp(cb); };
 
   setInterval(sweep, 60e3).unref();
+  refreshTurn(); setInterval(refreshTurn, 3600e3).unref();
   scheduleNightly();
   return new Promise((ok) => server.listen(port, host, () => ok(server)));
 }

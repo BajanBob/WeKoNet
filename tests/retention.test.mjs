@@ -47,3 +47,29 @@ test('saved contact: both sides derive mirrored mailboxes; SOS mail sealed + rep
   await assert.rejects(openMail(lb, sealed), /replayed/);
   await assert.rejects(openMail(la, sealed)); // wrong direction / AAD
 });
+
+test('retention: saved contacts never expire; SOS retention can be extended', async () => {
+  const { setSosRetention } = await import('../src/storage/retention.js');
+  const now = Date.UTC(2026, 9, 27), HOUR = 3600e3;
+  assert.equal(isExpired({ type: 'contact', createdAt: now - 400 * DAY }, now), false);
+  setSosRetention('7d');
+  assert.equal(isExpired({ type: 'sos', createdAt: now - 6 * DAY }, now), false);
+  assert.equal(isExpired({ type: 'sos', createdAt: now - 8 * DAY }, now), true);
+  assert.equal(isExpired({ type: 'message', createdAt: now - 4 * HOUR }, now), true, 'messages still 3 h');
+  setSosRetention('30d');
+  assert.equal(isExpired({ type: 'sos', createdAt: now - 29 * DAY }, now), false);
+  setSosRetention('3h');
+  assert.equal(isExpired({ type: 'sos', createdAt: now - 4 * HOUR }, now), true);
+});
+
+test('app lock: PIN stored as salted hash, wrong PIN rejected', async () => {
+  const { makePinRecord, checkPin, validPin } = await import('../src/storage/lock.js');
+  assert.equal(validPin('12'), false); assert.equal(validPin('1234'), true); assert.equal(validPin('12a4'), false);
+  const rec = await makePinRecord('482915', 1000); // low iteration count keeps the test fast
+  assert.ok(!JSON.stringify(rec).includes('482915'));
+  assert.equal(await checkPin('482915', rec), true);
+  assert.equal(await checkPin('482916', rec), false);
+  const rec2 = await makePinRecord('482915', 1000);
+  assert.notEqual(rec.hash, rec2.hash, 'salted');
+  await assert.rejects(makePinRecord('12'), /4 to 8 digits/);
+});

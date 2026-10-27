@@ -38,6 +38,15 @@ People are identified by a **WeKoNet ID** (`WKN-XXXX-XXXX-XXXX-XXXX`) derived fr
 
 All of this is covered by tests: `npm test` (handshake, tampering, impostor, forged MAC, beacon forgery/expiry, ratchet replay, frame tamper, relay admission/cap/expiry, mailbox purge).
 
+## Links, calls on every network, app lock
+- **Short beacon links** (~47 characters, `https://wekonet.app/b/#s.…`): a sealed copy of the beacon is parked on your relay under an ID derived from the link's own key, so the relay holds only ciphertext. *Copy full link* (~340 characters, compact v2 format) still works if the relay restarts.
+- **TURN through Cloudflare**: set `CF_TURN_KEY_ID` and `CF_TURN_API_TOKEN` on the relay (Render asks for them). The relay hands short-lived TURN credentials to people in a room, so calls connect on mobile data and *Hide my IP* works; no TURN password is built into the app.
+- **App lock**: optional 4–8 digit PIN (Settings → App lock), stored as a salted PBKDF2 hash; locks after 0, 1 or 5 minutes in the background; 10 wrong PINs erase WeKoNet.
+- **SOS records** can be kept 3 hours (default), 7 days or 30 days. Saved connections never expire on their own.
+
+## Release signing
+The Android build is always a release (non-debuggable) APK plus a Play Store bundle. Add these GitHub secrets so every build uses the same key: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`. `public/.well-known/assetlinks.json` holds that key's SHA-256 fingerprint so `https://wekonet.app/b/…` links open the app directly; if you use Google Play App Signing, add Play's app-signing fingerprint there too.
+
 ## Running in the background
 While a call or beacon room is open (every *Keep connection open* option: until the call ends, 1 hr, 2 hr, all day or keep live), WeKoNet stays connected when you leave the app, like WhatsApp:
 - **Android** shows a "WeKoNet is connected" notification and keeps running until the call or beacon ends.

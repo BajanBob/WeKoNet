@@ -86,6 +86,30 @@ export class Signaling extends EventTarget {
 
 export const relayHost = (url) => { try { return new URL(url).host; } catch { return url; } };
 
+/** Send one message to the relay and wait for its answer (retries while it wakes up). */
+export async function relayRequest(url, msg, okOp, { maxWaitMs = 90e3 } = {}) {
+  const deadline = Date.now() + maxWaitMs;
+  for (;;) {
+    try {
+      return await new Promise((resolve, reject) => {
+        const ws = new WebSocket(url);
+        const t = setTimeout(() => { ws.close(); reject(new Error('timeout')); }, 15e3);
+        ws.onopen = () => ws.send(JSON.stringify(msg));
+        ws.onmessage = (e) => {
+          const m = JSON.parse(e.data);
+          if (m.op !== okOp && m.op !== 'error') return;
+          clearTimeout(t); ws.close();
+          if (m.op === 'error') { const err = new Error(m.code); err.relayCode = m.code; reject(err); } else resolve(m);
+        };
+        ws.onerror = () => { clearTimeout(t); reject(new Error('unreachable')); };
+      });
+    } catch (e) {
+      if (e.relayCode || Date.now() + 3e3 > deadline) throw e;
+      await new Promise((r) => setTimeout(r, 3e3));
+    }
+  }
+}
+
 /** Open (and close) one connection so a sleeping relay starts waking up
  *  as soon as the app opens, before anyone creates a beacon. */
 export function warmRelay(url) {

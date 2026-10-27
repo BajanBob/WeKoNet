@@ -1,0 +1,8 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "app.wekonet.connect",
+    "sha256_cert_fingerprints": ["D4:CD:89:F8:C2:8F:83:ED:A2:41:3A:51:C1:6E:CA:1C:C1:F8:5E:F7:05:DA:7C:3B:AB:97:D5:45:9B:86:16:81"]
+  }
+}]

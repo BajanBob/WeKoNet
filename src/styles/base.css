@@ -214,3 +214,13 @@ html[data-sos="on"] .sos-fab {
 .incall-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--danger); animation: incall-pulse 1.4s infinite; }
 @keyframes incall-pulse { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .incall-dot { animation: none; } }
+
+/* app lock */
+html[data-locked] main, html[data-locked] .tabbar, html[data-locked] .toasts,
+html[data-locked] .id-chip, html[data-locked] dialog.modal { visibility: hidden; }
+.lockscreen {
+  position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 24px;
+  background: var(--bg, #0b1020);
+}
+.lock-card { width: min(360px, 100%); display: grid; gap: 12px; text-align: center; }
+.lock-card input { font-size: 1.6rem; letter-spacing: .4em; text-align: center; }

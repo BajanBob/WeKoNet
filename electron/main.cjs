@@ -27,7 +27,7 @@ app.on('open-url', (e, url) => { e.preventDefault(); deliverBeacon(url); }); // 
 app.setAsDefaultProtocolClient('wekonet');
 
 function deliverBeacon(url) {
-  if (!/^wekonet:\/\/b#v1\./.test(url)) return;
+  if (!/^wekonet:\/\/b#(?:v1|v2|s)\./.test(url)) return;
   if (win?.webContents && !win.webContents.isLoading()) win.webContents.send('wekonet:beacon', url);
   else pendingBeacon = url;
 }
