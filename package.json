@@ -44,8 +44,9 @@
     "directories": { "output": "release" },
     "files": ["dist/**", "electron/**", "package.json"],
     "protocols": [{ "name": "WeKoNet Beacon", "schemes": ["wekonet"] }],
-    "win": { "icon": "resources/icon.png", "artifactName": "WeKoNet-${version}-${arch}-${target}.${ext}" },
-    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "perMachine": false },
+    "win": { "icon": "resources/icon.png" },
+    "portable": { "artifactName": "WeKoNet-${version}-Portable.${ext}" },
+    "nsis": { "artifactName": "WeKoNet-${version}-Setup.${ext}", "oneClick": false, "allowToChangeInstallationDirectory": true, "perMachine": false },
     "linux": {
       "icon": "resources/icon.png",
       "category": "Network",
