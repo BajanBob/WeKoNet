@@ -4,7 +4,7 @@
 import { generateIdentity, wekonetId } from '../crypto/identity.js';
 import { sealJSON, openJSON } from '../crypto/aead.js';
 import { te } from '../crypto/util.js';
-import { isExpired, next1am, purgeOverdue } from './retention.js';
+import { isExpired, next1am, purgeOverdue, SWEEP_MS } from './retention.js';
 
 const DB = 'wekonet';
 const STORES = ['keys', 'records', 'settings'];
@@ -89,9 +89,12 @@ export async function list(type) {
 export const remove = (id) => del('records', id);
 
 // ---------- purge ----------
-export async function purgeExpired(now = Date.now()) {
+// wipeGuest=false is used by the 5-minute sweep: it deletes expired records
+// but never wipes a guest install in the middle of a call (that only happens
+// at the 01:00 nightly purge or when the guest chooses "Remove everything").
+export async function purgeExpired(now = Date.now(), { wipeGuest = true } = {}) {
   const guest = await settings.get('guest', false);
-  if (guest) return wipeAll();
+  if (guest && wipeGuest) return wipeAll();
   const rows = await tx('records', 'readonly', (o) => o.getAll());
   let n = 0;
   for (const r of rows || []) if (isExpired(r, now)) { await del('records', r.id); n++; }
@@ -108,7 +111,8 @@ export async function wipeAll() {
   return 'wiped';
 }
 
-/** Schedule the 01:00 nightly purge (and catch up if the app was closed). */
+/** Schedule the 01:00 nightly purge (and catch up if the app was closed),
+ *  plus a sweep of expired items every few minutes. */
 export async function scheduleNightlyPurge(onPurged) {
   const last = await settings.get('lastPurge', 0);
   if (purgeOverdue(last)) onPurged?.(await purgeExpired());
@@ -117,4 +121,7 @@ export async function scheduleNightlyPurge(onPurged) {
     setTimeout(async () => { onPurged?.(await purgeExpired()); arm(); }, ms);
   };
   arm();
+  // History only lives 3 hours, so expired items are swept every 5 minutes
+  // instead of waiting for 01:00.
+  setInterval(() => { purgeExpired(Date.now(), { wipeGuest: false }).then((n) => { if (n > 0) onPurged?.(n); }, () => {}); }, SWEEP_MS);
 }

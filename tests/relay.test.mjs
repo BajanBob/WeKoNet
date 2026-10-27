@@ -79,3 +79,20 @@ test('relay: linger 1h gives a real deadline', async () => {
   assert.ok(jb.deadline > Date.now() + 3590e3 && jb.deadline <= Date.now() + 3600e3);
   A.close(); B.close();
 });
+
+test('relay: short-link stash holds ciphertext until expiry, rejects bad input', async () => {
+  const A = await client();
+  const id = 'abcdefghijklmnop';
+  A.send({ op: 'stash', id, data: 'Q2lwaGVydGV4dA', exp: Date.now() + 60e3 });
+  assert.equal((await A.next()).op, 'stashed');
+  A.send({ op: 'stash', id, data: 'Zm9v', exp: Date.now() + 60e3 }); // id already taken
+  assert.equal((await A.next()).code, 'bad-request');
+  const B = await client();
+  B.send({ op: 'fetch', id });
+  const got = await B.next(); assert.equal(got.op, 'stash'); assert.equal(got.data, 'Q2lwaGVydGV4dA');
+  B.send({ op: 'fetch', id: 'zzzzzzzzzzzzzzzz' });
+  assert.equal((await B.next()).code, 'no-such-link');
+  B.send({ op: 'stash', id: 'qrstuvwxyzABCDEF', data: 'x', exp: Date.now() - 1 });
+  assert.equal((await B.next()).code, 'bad-request');
+  A.close(); B.close();
+});

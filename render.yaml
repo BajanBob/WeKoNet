@@ -1,31 +1,77 @@
-# Render Blueprint for the WeKoNet relay (Dashboard → Blueprints → New → this repo).
-# If you created the service by hand, copy these settings into it instead.
+# WeKoNet on Render.com
+#   Deploy: https://render.com/deploy?repo=https://github.com/BajanBob/WeKoNet
+# The relay runs on the always-on "starter" plan so SOS mail and "Keep live"
+# rooms are not lost when it would otherwise sleep. It also serves the beacon
+# landing page (https://wekonet-relay.onrender.com/b/#…) that opens the app.
 services:
   - type: web
     name: wekonet-relay
-    runtime: node
-    plan: starter            # paid plan: no sleeping, so beacons connect instantly
-    buildCommand: "true"     # the relay has zero dependencies
-    startCommand: node server/relay.js
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./deploy/Dockerfile.relay
+    dockerContext: .
     healthCheckPath: /healthz
+    autoDeploy: true
     envVars:
-      - key: HOST
-        value: 0.0.0.0
-      - key: NODE_VERSION
-        value: "22"
-      # Apps allowed to connect (Android, iOS, desktop, web)
+      # Render's proxy forwards the real client address in X-Forwarded-For.
+      - key: TRUST_PROXY
+        value: "1"
       - key: ALLOWED_ORIGINS
-        value: https://localhost,capacitor://localhost,app://wekonet,https://wekonet-relay.onrender.com
-      # Render's proxy hides client IPs, so per-IP limits act as service-wide limits:
+        value: https://wekonet-relay.onrender.com,https://wekonet.app,https://wekonet-web.onrender.com,capacitor://localhost,https://localhost,app://wekonet
+      # Safety margin in case several users share one address (mobile carriers, offices).
       - key: MAX_CONN_PER_IP
-        value: "2000"
+        value: "200"
       - key: PENDING_ROOMS_PER_IP
-        value: "2000"
+        value: "100"
       - key: NEW_BOXES_PER_HOUR
-        value: "20000"
-      # Optional: link to your APK for the beacon landing page's download button
-      - key: DOWNLOAD_URL
-        sync: false
-      # Optional: release-key SHA-256 so beacon links open the app directly (Android App Links)
+        value: "1000"
+      # Lets Android open beacon links straight in the app (release-key fingerprint).
       - key: ANDROID_CERT_SHA256
+        value: "D4:CD:89:F8:C2:8F:83:ED:A2:41:3A:51:C1:6E:CA:1C:C1:F8:5E:F7:05:DA:7C:3B:AB:97:D5:45:9B:86:16:81"
+      # Link for the beacon page's "Get WeKoNet for Android" button.
+      - key: DOWNLOAD_URL
+        value: https://github.com/BajanBob/WeKoNet/releases/latest
+      # Cloudflare TURN (Cloudflare dashboard → Realtime → TURN Server → create key).
+      # Render asks for these two values when the blueprint syncs; they never go into the app.
+      - key: CF_TURN_KEY_ID
         sync: false
+      - key: CF_TURN_API_TOKEN
+        sync: false
+
+  # OPTIONAL — the full web app on your own domain, so people without the app
+  # can join from a browser. Only enable this once you own the domain:
+  #   1. uncomment the block below and set your domain,
+  #   2. set the GitHub variable VITE_APP_BASE to https://<your-domain>/b/ and rebuild.
+  # - type: web
+  #   name: wekonet-web
+  #   runtime: static
+  #   buildCommand: npm install --no-audit --no-fund && npm run build
+  #   staticPublishPath: ./dist
+  #   domains:
+  #     - wekonet.app
+  #   envVars:
+  #     - key: ELECTRON_SKIP_BINARY_DOWNLOAD
+  #       value: "1"
+  #     - key: VITE_RELAY_URL
+  #       value: wss://wekonet-relay.onrender.com/ws
+  #     - key: VITE_APP_BASE
+  #       value: https://wekonet.app/b/
+  #   headers:
+  #     - path: /*
+  #       name: Content-Security-Policy
+  #       value: "frame-ancestors 'none'"
+  #     - path: /*
+  #       name: X-Content-Type-Options
+  #       value: nosniff
+  #     - path: /*
+  #       name: Referrer-Policy
+  #       value: no-referrer
+  #     - path: /*
+  #       name: Strict-Transport-Security
+  #       value: max-age=63072000; includeSubDomains
+  #     - path: /*
+  #       name: Permissions-Policy
+  #       value: camera=(self), microphone=(self), geolocation=(self), payment=(), usb=()
+  #     - path: /*
+  #       name: Cross-Origin-Opener-Policy
+  #       value: same-origin

@@ -11,13 +11,30 @@ export class Signaling extends EventTarget {
     this.url = url; this.keys = keys; this.peer = null; this.ws = null; this.pending = [];
   }
 
-  connect() {
+  /** Connect, retrying for up to ~90 s: a free-tier relay can take a minute to wake up. */
+  async connect({ maxWaitMs = 90e3 } = {}) {
+    const deadline = Date.now() + maxWaitMs;
+    let warned = false;
+    for (;;) {
+      try { return await this.#tryConnect(); } catch (err) {
+        if (Date.now() + 3e3 > deadline) throw new Error(`Cannot reach the WeKoNet relay (${relayHost(this.url)}). Check your internet connection and try again.`);
+        if (!warned) { warned = true; this.#emit('warning', { message: 'Waking up the WeKoNet relay — this can take up to a minute…' }); }
+        await new Promise((r) => setTimeout(r, 3e3));
+      }
+    }
+  }
+
+  #tryConnect() {
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(this.url);
-      this.ws = ws;
-      ws.onopen = () => { for (const m of this.pending.splice(0)) ws.send(m); resolve(); };
-      ws.onerror = () => reject(new Error('Cannot reach the WeKoNet relay'));
-      ws.onclose = () => this.dispatchEvent(new CustomEvent('closed'));
+      let open = false;
+      ws.onopen = () => {
+        open = true; this.ws = ws;
+        for (const m of this.pending.splice(0)) ws.send(m);
+        resolve();
+      };
+      ws.onerror = () => { if (!open) reject(new Error('relay unreachable')); };
+      ws.onclose = () => { if (open) this.dispatchEvent(new CustomEvent('closed')); else reject(new Error('relay closed')); };
       let chain = Promise.resolve(); // keep relay messages in order
       ws.onmessage = (e) => {
         chain = chain.then(() => this.#onMessage(e.data)).catch((err) => this.#emit('warning', { message: err.message }));
@@ -67,6 +84,43 @@ export class Signaling extends EventTarget {
       default: return undefined;
     }
   }
+}
+
+export const relayHost = (url) => { try { return new URL(url).host; } catch { return url; } };
+
+/** Send one message to the relay and wait for its answer (retries while it wakes up). */
+export async function relayRequest(url, msg, okOp, { maxWaitMs = 90e3 } = {}) {
+  const deadline = Date.now() + maxWaitMs;
+  for (;;) {
+    try {
+      return await new Promise((resolve, reject) => {
+        const ws = new WebSocket(url);
+        const t = setTimeout(() => { ws.close(); reject(new Error('timeout')); }, 15e3);
+        ws.onopen = () => ws.send(JSON.stringify(msg));
+        ws.onmessage = (e) => {
+          const m = JSON.parse(e.data);
+          if (m.op !== okOp && m.op !== 'error') return;
+          clearTimeout(t); ws.close();
+          if (m.op === 'error') { const err = new Error(m.code); err.relayCode = m.code; reject(err); } else resolve(m);
+        };
+        ws.onerror = () => { clearTimeout(t); reject(new Error('unreachable')); };
+      });
+    } catch (e) {
+      if (e.relayCode || Date.now() + 3e3 > deadline) throw e;
+      await new Promise((r) => setTimeout(r, 3e3));
+    }
+  }
+}
+
+/** Open (and close) one connection so a sleeping relay starts waking up
+ *  as soon as the app opens, before anyone creates a beacon. */
+export function warmRelay(url) {
+  try {
+    const ws = new WebSocket(url);
+    ws.onopen = () => ws.close();
+    ws.onerror = () => {};
+    setTimeout(() => { try { ws.close(); } catch { /* ignore */ } }, 120e3);
+  } catch { /* ignore */ }
 }
 
 /** Separate long-lived connection used only for SOS / contact mailboxes. */

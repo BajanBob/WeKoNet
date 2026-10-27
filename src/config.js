@@ -10,6 +10,9 @@ export const CONFIG = {
   // Public STUN works for most home / mobile networks. For strict NATs add a
   // TURN server via VITE_ICE_SERVERS (media stays end-to-end encrypted through it).
   iceServers: JSON.parse(env.VITE_ICE_SERVERS || JSON.stringify([
-    { urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] },
+    // STUN helps two devices find each other. TURN servers (for every network
+    // and for "Hide my IP") are handed out by the relay per call — see
+    // CF_TURN_KEY_ID / CF_TURN_API_TOKEN in render.yaml.
+    { urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] },
   ])),
 };

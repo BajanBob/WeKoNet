@@ -2,12 +2,15 @@
 // Hardened Electron: sandboxed renderer, no Node in the page, context isolation,
 // custom app:// origin (so CSP 'self' is meaningful), navigation locked down,
 // only camera / microphone / geolocation permissions ever granted.
-const { app, BrowserWindow, protocol, net, session, shell, Menu } = require('electron');
+const { app, BrowserWindow, protocol, net, session, shell, Menu, Tray, nativeImage, ipcMain } = require('electron');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
 const DIST = path.join(__dirname, '..', 'dist');
 let win = null;
+let tray = null;
+let keepAlive = false;   // true while a call / lingering beacon room is open
+let quitting = false;
 let pendingBeacon = process.argv.find((a) => a.startsWith('wekonet://')) || null;
 
 protocol.registerSchemesAsPrivileged([
@@ -24,7 +27,7 @@ app.on('open-url', (e, url) => { e.preventDefault(); deliverBeacon(url); }); // 
 app.setAsDefaultProtocolClient('wekonet');
 
 function deliverBeacon(url) {
-  if (!/^wekonet:\/\/b#v1\./.test(url)) return;
+  if (!/^wekonet:\/\/b#(?:v1|v2|s)\./.test(url)) return;
   if (win?.webContents && !win.webContents.isLoading()) win.webContents.send('wekonet:beacon', url);
   else pendingBeacon = url;
 }
@@ -38,6 +41,7 @@ function createWindow() {
       contextIsolation: true, sandbox: true, nodeIntegration: false,
       webSecurity: true, allowRunningInsecureContent: false,
       spellcheck: false, devTools: !app.isPackaged,
+      backgroundThrottling: false, // keep the connection alive when hidden / minimised
     },
   });
   win.loadURL('app://wekonet/index.html');
@@ -50,7 +54,40 @@ function createWindow() {
     return { action: 'deny' };
   });
   win.webContents.on('will-attach-webview', (e) => e.preventDefault());
+
+  // Like WhatsApp: while a call or lingering beacon is open, closing the
+  // window hides WeKoNet to the tray instead of quitting.
+  win.on('close', (e) => {
+    if (keepAlive && !quitting) { e.preventDefault(); win.hide(); showTray(); }
+  });
 }
+
+function showWindow() {
+  if (!win) createWindow();
+  win.show(); if (win.isMinimized()) win.restore(); win.focus();
+}
+
+function showTray() {
+  if (tray) return;
+  const icon = nativeImage.createFromPath(path.join(DIST, 'icon-192.png')).resize({ width: 16, height: 16 });
+  tray = new Tray(icon);
+  tray.setToolTip('WeKoNet — connected in the background');
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Open WeKoNet', click: showWindow },
+    { type: 'separator' },
+    { label: 'Quit WeKoNet (ends the call)', click: () => { quitting = true; app.quit(); } },
+  ]));
+  tray.on('click', showWindow);
+}
+
+function hideTray() { tray?.destroy(); tray = null; }
+
+ipcMain.on('wekonet:keep-alive', (e, on) => {
+  if (!win || e.sender !== win.webContents) return;
+  keepAlive = on === true;
+  if (keepAlive) showTray(); else if (win.isVisible()) hideTray();
+  if (!keepAlive && !win.isVisible()) { quitting = true; app.quit(); } // call ended while hidden
+});
 
 // Nightly 01:00 self-purge also runs from the main process (clears caches,
 // storage of expired items happens in the renderer's scheduler).
@@ -97,5 +134,6 @@ app.whenReady().then(() => {
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
+app.on('before-quit', () => { quitting = true; });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('web-contents-created', (_e, wc) => wc.on('will-redirect', (e, url) => { if (!url.startsWith('app://wekonet/')) e.preventDefault(); }));

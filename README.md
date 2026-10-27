@@ -1,5 +1,7 @@
 # WeKoNet Connect
 
+**WeKoNet — the Disposable Chat Software.**
+
 Beacon-initiated, end-to-end encrypted **voice, video, chat, live location and SOS** for up to **3 people** — with no phone number, no email and no account.
 
 One codebase → **Android APK · iOS app · Windows .exe · Raspberry Pi (arm64 .deb / AppImage) · Linux · Web/PWA**.
@@ -36,9 +38,24 @@ People are identified by a **WeKoNet ID** (`WKN-XXXX-XXXX-XXXX-XXXX`) derived fr
 
 All of this is covered by tests: `npm test` (crypto fuzzing, hostile-relay and load tests) and `npm run test:e2e` (real-browser attacks) (handshake, tampering, impostor, forged MAC, beacon forgery/expiry, ratchet replay, frame tamper, relay admission/cap/expiry, mailbox purge).
 
+## Links, calls on every network, app lock
+- **Short beacon links** (~47 characters, `https://wekonet.app/b/#s.…`): a sealed copy of the beacon is parked on your relay under an ID derived from the link's own key, so the relay holds only ciphertext. *Copy full link* (~340 characters, compact v2 format) still works if the relay restarts.
+- **TURN through Cloudflare**: set `CF_TURN_KEY_ID` and `CF_TURN_API_TOKEN` on the relay (Render asks for them). The relay hands short-lived TURN credentials to people in a room, so calls connect on mobile data and *Hide my IP* works; no TURN password is built into the app.
+- **App lock**: optional 4–8 digit PIN (Settings → App lock), stored as a salted PBKDF2 hash; locks after 0, 1 or 5 minutes in the background; 10 wrong PINs erase WeKoNet.
+- **SOS records** can be kept 3 hours (default), 7 days or 30 days. Saved connections never expire on their own.
+
+## Release signing
+The Android build is always a release (non-debuggable) APK plus a Play Store bundle. Add these GitHub secrets so every build uses the same key: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`. `public/.well-known/assetlinks.json` holds that key's SHA-256 fingerprint so `https://wekonet.app/b/…` links open the app directly; if you use Google Play App Signing, add Play's app-signing fingerprint there too.
+
+## Running in the background
+While a call or beacon room is open (every *Keep connection open* option: until the call ends, 1 hr, 2 hr, all day or keep live), WeKoNet stays connected when you leave the app, like WhatsApp:
+- **Android** shows a "WeKoNet is connected" notification and keeps running until the call or beacon ends.
+- **Windows / Linux / Raspberry Pi**: closing the window hides WeKoNet to the tray; use *Quit WeKoNet* in the tray menu to end it.
+- **iOS** keeps an active call running in the background (audio/VoIP mode); an idle open beacon may be paused by iOS.
+
 ## Retention & self-purge
-- History (messages, calls, SOS) is kept **at most 3 years**, then deleted.
-- **Every night at 01:00** the app purges expired beacons, lingering rooms, location trails older than 24 h and temporary data; a **guest install wipes everything**. If the app was closed at 01:00 the purge runs on next launch. The relay purges idle rooms and all stored mail at 01:00 too.
+- History (messages, calls, SOS) and location trails are kept **at most 3 hours**, then deleted. Expired items disappear from the app at once and are deleted by a sweep every 5 minutes.
+- **Every night at 01:00** the app purges expired beacons, lingering rooms, location trails older than 3 h and temporary data; a **guest install wipes everything**. If the app was closed at 01:00 the purge runs on next launch. The relay purges idle rooms and all stored mail at 01:00 too.
 
 ## SOS help mode
 The red **SOS** button sends your live GPS position every 20 s — encrypted — to everyone in the current call **and** to every saved connection's mailbox. Their device sounds a siren, vibrates and opens the map at your location with an "Open in maps" link. Saved connections are created after a call with **Save connection**.

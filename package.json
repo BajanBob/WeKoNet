@@ -2,7 +2,7 @@
   "name": "wekonet",
   "productName": "WeKoNet",
   "version": "1.0.0",
-  "description": "WeKoNet Connect \u2014 beacon-initiated, end-to-end encrypted P2P voice, video, chat, location sharing and SOS for up to 3 people.",
+  "description": "WeKoNet — the Disposable Chat Software. Beacon-initiated, end-to-end encrypted P2P voice, video, chat, location sharing and SOS for up to 3 people.",
   "type": "module",
   "main": "electron/main.cjs",
   "license": "AGPL-3.0-or-later",
@@ -17,9 +17,9 @@
     "cap:android": "npm run build && npx cap add android && node scripts/patch-android.mjs && npx cap sync android",
     "cap:ios": "npm run build && npx cap add ios && node scripts/patch-ios.mjs && npx cap sync ios",
     "electron": "npm run build && electron .",
-    "dist:win": "npm run build && electron-builder --win nsis portable --x64",
-    "dist:pi": "npm run build && electron-builder --linux AppImage deb --arm64",
-    "dist:linux": "npm run build && electron-builder --linux AppImage deb --x64",
+    "dist:win": "npm run build && electron-builder --win nsis portable --x64 --publish never",
+    "dist:pi": "npm run build && electron-builder --linux AppImage deb --arm64 --publish never",
+    "dist:linux": "npm run build && electron-builder --linux AppImage deb --x64 --publish never",
     "test:e2e": "node tests/e2e/attack.e2e.mjs"
   },
   "dependencies": {
@@ -43,34 +43,16 @@
   "build": {
     "appId": "app.wekonet.connect",
     "productName": "WeKoNet",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "dist/**",
-      "electron/**",
-      "package.json"
-    ],
-    "protocols": [
-      {
-        "name": "WeKoNet Beacon",
-        "schemes": [
-          "wekonet"
-        ]
-      }
-    ],
-    "win": {
-      "icon": "resources/icon.png",
-      "artifactName": "WeKoNet-${version}-${arch}-${target}.${ext}"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "perMachine": false
-    },
+    "directories": { "output": "release" },
+    "files": ["dist/**", "electron/**", "package.json"],
+    "protocols": [{ "name": "WeKoNet Beacon", "schemes": ["wekonet"] }],
+    "win": { "icon": "resources/icon.png" },
+    "portable": { "artifactName": "WeKoNet-${version}-Portable.${ext}" },
+    "nsis": { "artifactName": "WeKoNet-${version}-Setup.${ext}", "oneClick": false, "allowToChangeInstallationDirectory": true, "perMachine": false },
     "linux": {
       "icon": "resources/icon.png",
       "category": "Network",
+      "maintainer": "WeKoNet",
       "artifactName": "WeKoNet-${version}-${arch}.${ext}",
       "mimeTypes": [
         "x-scheme-handler/wekonet"

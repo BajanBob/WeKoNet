@@ -26,6 +26,38 @@ const MAILBOX_TTL = 24 * 3600e3;
 const MAILBOX_MAX = 50;
 const MAX_PEERS = 3;
 
+// ---------------- TURN (Cloudflare) ----------------
+// When CF_TURN_KEY_ID + CF_TURN_API_TOKEN are set, the relay hands short-lived
+// Cloudflare TURN credentials to people who join a room, so calls connect on
+// any network and "Hide my IP" works. No TURN password is ever built into the app.
+const CF_TURN_KEY_ID = process.env.CF_TURN_KEY_ID || '';
+const CF_TURN_API_TOKEN = process.env.CF_TURN_API_TOKEN || '';
+const TURN_TTL_S = 24 * 3600;      // credentials stay valid at least ~23 h after they are handed out
+let turnIce = null;
+async function refreshTurn() {
+  if (!CF_TURN_KEY_ID || !CF_TURN_API_TOKEN) return;
+  try {
+    const r = await fetch(`https://rtc.live.cloudflare.com/v1/turn/keys/${encodeURIComponent(CF_TURN_KEY_ID)}/credentials/generate-ice-servers`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${CF_TURN_API_TOKEN}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ ttl: TURN_TTL_S }),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json();
+    const list = (Array.isArray(j.iceServers) ? j.iceServers : [j.iceServers]).filter((x) => x && x.urls);
+    turnIce = list.map((x) => ({
+      urls: [].concat(x.urls).filter((u) => !/:53(\?|$)/.test(u)), // port 53 is blocked by browsers
+      ...(x.username ? { username: x.username, credential: x.credential } : {}),
+    })).filter((x) => x.urls.length);
+  } catch (e) {
+    console.error(`TURN credentials refresh failed (${e.message})`);
+  }
+}
+export const turnConfigured = () => !!turnIce;
+let turnTimer = null;
+
+const STASH_MAX = 50000, STASH_PER_IP_HOUR = 30, STASH_MAX_TTL = 125 * 60e3;
+
 const okId = (s, min = 16, max = 64) => typeof s === 'string' && s.length >= min && s.length <= max && /^[A-Za-z0-9_-]+$/.test(s);
 const sha384 = (s) => crypto.createHash('sha384').update(Buffer.from(s, 'base64url')).digest('base64url');
 const safeEq = (a, b) => a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
@@ -49,11 +81,13 @@ function createCore() {
   const ipCount = new Map();
   const ipPending = new Map(); // ip → unanswered rooms created
   const ipBoxes = new Map();   // ip → { n, since }
+  const stash = new Map();     // short-link id → { data, exp }  (sealed beacons; the relay cannot open them)
+  const stashByIp = new Map(); // ip → { n, since }
   const hasOwn = (o, k) => typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k);
 
   function stats() {
     let connections = 0; for (const n of ipCount.values()) connections += n;
-    return { rooms: rooms.size, mailboxes: mailboxes.size, connections };
+    return { rooms: rooms.size, mailboxes: mailboxes.size, stash: stash.size, connections };
   }
 
   function dropRoom(key) {
@@ -143,7 +177,7 @@ function createCore() {
       // 'end' = no clock: the room lives while anyone is in it, dies when the last leaves.
       r.deadline = r.linger === 'end' ? Infinity : r.started + LINGER[r.linger];
     }
-    c.send({ op: 'joined', peer, peers: others, deadline: Number.isFinite(r.deadline) ? r.deadline : null });
+    c.send({ op: 'joined', peer, peers: others, deadline: Number.isFinite(r.deadline) ? r.deadline : null, ...(turnIce ? { ice: turnIce } : {}) });
     for (const o of others) r.peers.get(o).send({ op: 'peer-joined', peer });
   }
 
@@ -227,6 +261,25 @@ function createCore() {
         mailboxes.set(m.box, q);
         return c.send({ op: 'posted', box: m.box });
       }
+      case 'stash': { // park a sealed beacon for a short link until it expires
+        if (!okId(m.id, 16, 16) || typeof m.data !== 'string' || m.data.length > 3000 || !/^[A-Za-z0-9_-]+$/.test(m.data)) throw 0;
+        const now = Date.now();
+        const exp = Math.min(Number(m.exp) || 0, now + STASH_MAX_TTL);
+        if (!(exp > now)) throw 0;
+        const q = stashByIp.get(c.ip) || { n: 0, since: now };
+        if (now - q.since > 3600e3) { q.n = 0; q.since = now; }
+        if (q.n >= STASH_PER_IP_HOUR || stash.size >= STASH_MAX) return c.send({ op: 'error', code: 'busy', id: m.id });
+        if (stash.has(m.id)) throw 0;
+        q.n++; stashByIp.set(c.ip, q);
+        stash.set(m.id, { data: m.data, exp });
+        return c.send({ op: 'stashed', id: m.id });
+      }
+      case 'fetch': {
+        if (!okId(m.id, 16, 16)) throw 0;
+        const e = stash.get(m.id);
+        if (!e || e.exp < Date.now()) return c.send({ op: 'error', code: 'no-such-link', id: m.id });
+        return c.send({ op: 'stash', id: m.id, data: e.data });
+      }
       case 'ping': return c.send({ op: 'pong' });
       default: throw 0;
     }
@@ -235,6 +288,8 @@ function createCore() {
   // ---------------- housekeeping ----------------
   function sweep() {
     const now = Date.now();
+    for (const [k, e] of stash) if (e.exp < now) stash.delete(k);
+    for (const [ip, q] of stashByIp) if (now - q.since > 3600e3) stashByIp.delete(ip);
     for (const [k, r] of rooms) {
       const dead = (!r.started && now > r.exp && r.peers.size === 0) ||
                    (r.started && r.peers.size === 0 && (r.linger === 'end' || now > r.deadline));
@@ -331,9 +386,10 @@ export function startRelay({
   });
 
   server.on('upgrade', (req, sock) => {
-    // Behind a reverse proxy every socket comes from the proxy; use the address
-    // the proxy appended (the LAST X-Forwarded-For entry — earlier ones are client-controlled).
-    const xff = TRUST_PROXY && String(req.headers['x-forwarded-for'] || '').split(',').map((x) => x.trim()).filter(Boolean).pop();
+    // Behind a hosting proxy (Render, Fly, …) every client arrives from the
+    // proxy's address; TRUST_PROXY=1 uses the client address it forwards (first
+    // X-Forwarded-For entry — what Render sets). Only enable it behind such a proxy.
+    const xff = TRUST_PROXY && String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
     const ip = xff || req.socket.remoteAddress || '';
     const origin = req.headers.origin || '';
     const key = req.headers['sec-websocket-key'];
@@ -362,6 +418,7 @@ export function startRelay({
   const sweeper = setInterval(core.sweep, 60e3); sweeper.unref();
   server.on('close', () => clearInterval(sweeper));
   scheduleNightly(core);
+  if (!turnTimer) { refreshTurn(); turnTimer = setInterval(refreshTurn, 3600e3); turnTimer.unref(); }
   return new Promise((ok) => server.listen(port, host, () => ok(server)));
 }
 

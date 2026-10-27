@@ -1,0 +1,13 @@
+name: Relay check
+on:
+  workflow_dispatch:
+  push:
+    paths: ['.github/workflows/relay-check.yml', 'scripts/relay-check.mjs']
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: node scripts/relay-check.mjs "${{ vars.VITE_RELAY_URL || 'wss://wekonet-relay.onrender.com/ws' }}"

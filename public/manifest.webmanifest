@@ -1,7 +1,7 @@
 {
   "name": "WeKoNet Connect",
   "short_name": "WeKoNet",
-  "description": "Beacon-initiated, end-to-end encrypted voice, video, chat, location and SOS.",
+  "description": "WeKoNet — the Disposable Chat Software. Beacon-initiated, end-to-end encrypted voice, video, chat, location and SOS.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

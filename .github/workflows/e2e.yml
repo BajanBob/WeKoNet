@@ -1,0 +1,30 @@
+name: End-to-end tests
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  calls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm install --no-audit --no-fund
+        env: { ELECTRON_SKIP_BINARY_DOWNLOAD: '1' }
+      - run: npm install --no-save --no-audit --no-fund @playwright/test@1
+      - run: npx playwright install --with-deps chromium
+      - name: Test build (local relay)
+        run: npm run build
+        env:
+          VITE_RELAY_URL: ws://127.0.0.1:8787/ws
+          VITE_APP_BASE: http://127.0.0.1:4173/b/
+          VITE_E2E_LOCAL: '1'
+      - name: Two browsers make real calls
+        shell: bash
+        run: |
+          set +e; npx playwright test -c tests/e2e/playwright.config.mjs 2>&1 | tee e2e.log; s=${PIPESTATUS[0]}
+          if [ $s -ne 0 ]; then echo "::error title=E2E failed::$(grep -vE '^\s*$' e2e.log | tail -n 80 | tr -d '\r' | sed -e 's/%/%25/g' | sed -e ':a;N;$!ba;s/\n/%0A/g')"; fi
+          exit $s

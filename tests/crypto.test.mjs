@@ -90,7 +90,7 @@ test('MITM: forged key-confirmation MAC is rejected', async () => {
 test('beacon: create → open round-trip; tamper, forgery and expiry fail', async () => {
   const id = await generateIdentity();
   const b = await createBeacon({ identity: id, signalUrl: 'wss://relay.example/ws', mode: 'video', linger: '2h', maxPeers: 3 });
-  assert.match(b.link, /^https:\/\/wekonet-relay\.onrender\.com\/b\/#v1\./);
+  assert.match(b.link, /^https:\/\/wekonet-relay\.onrender\.com\/b\/#v2\./);
   const o = await openBeacon(b.link);
   assert.equal(o.payload.room, b.payload.room);
   assert.equal(o.payload.max, 3);
@@ -137,4 +137,32 @@ test('media frames: AES-256-GCM per frame, header kept clear, tamper fails', asy
   assert.ok(!eq(enc, enc2), 'unique IV per frame');
   enc2[50] ^= 1;
   await assert.rejects(rx.decrypt(enc2, 10));
+});
+
+test('beacon v2: compact, signed, default relay omitted, P-384 point compression round-trips', async () => {
+  const { compressP384, decompressP384, sealShort, parseShort, shortId, openShort } = await import('../src/crypto/beacon.js');
+  const id = await generateIdentity();
+  assert.deepEqual(decompressP384(compressP384(id.pub)), id.pub);
+  const relay = 'wss://wekonet-relay.onrender.com/ws';
+  const b = await createBeacon({ identity: id, signalUrl: relay, defaultRelay: relay, mode: 'chat', linger: 'day', maxPeers: 2, label: 'hi' });
+  assert.ok(b.link.length < 360, `v2 link is ${b.link.length} chars`);
+  const o = await openBeacon(b.link, Date.now(), { defaultRelay: relay });
+  assert.equal(o.payload.sig, relay);
+  assert.equal(o.payload.fromId, id.id);
+  assert.equal(o.payload.mode, 'chat'); assert.equal(o.payload.linger, 'day'); assert.equal(o.payload.label, 'hi');
+  assert.deepEqual(o.inviterPub, id.pub);
+  // a guest whose app defaults to a different relay still connects to the inviter's when it is written in the link
+  const b2 = await createBeacon({ identity: id, signalUrl: relay, defaultRelay: 'wss://other/ws' });
+  assert.equal((await openBeacon(b2.link, Date.now(), { defaultRelay: 'wss://other/ws' })).payload.sig, relay);
+
+  // short link: relay only ever holds ciphertext under a key-derived id
+  const s = await sealShort(b.fragment);
+  const link = `https://wekonet.app/b/#${s.code}`;
+  assert.ok(link.length <= 48, `short link is ${link.length} chars`);
+  const k = parseShort(link);
+  assert.equal(await shortId(k), s.id);
+  assert.equal(await openShort(k, s.data), b.fragment);
+  const bad = s.data.slice(0, -2) + (s.data.endsWith('AA') ? 'AB' : 'AA');
+  await assert.rejects(openShort(k, bad), /tampered/);
+  assert.equal(parseShort('#v2.abc'), null);
 });

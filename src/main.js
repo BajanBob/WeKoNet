@@ -8,13 +8,15 @@ import './styles/plates.css';
 import { CONFIG } from './config.js';
 import { h, setRich } from './ui/sanitize.js';
 import * as vault from './storage/vault.js';
-import { createBeacon, openBeacon } from './crypto/beacon.js';
+import { setSosRetention } from './storage/retention.js';
+import { makePinRecord, checkPin, validPin, MAX_FAILS, LOCK_AFTER } from './storage/lock.js';
+import { createBeacon, openBeacon, sealShort, parseShort, shortId, openShort } from './crypto/beacon.js';
 import { b64u, unb64u } from './crypto/util.js';
 import { contactLinks, sealMail, openMail } from './crypto/contact.js';
 import { CallSession, E2EE_MEDIA } from './net/mesh.js';
-import { MailboxClient } from './net/signaling.js';
+import { MailboxClient, warmRelay, relayRequest } from './net/signaling.js';
 import { LocationSharer, SOSBeacon, playSiren, SHARE_DURATIONS } from './features/geo.js';
-import { onBeacon, shareToWhatsApp, shareNative, platform } from './platform.js';
+import { onBeacon, shareToWhatsApp, shareNative, platform, keepAlive } from './platform.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -31,13 +33,23 @@ async function boot() {
   S.plate = await vault.settings.get('plate', 'aurora');
   S.hideIp = await vault.settings.get('hideIp', false);
   S.autoJoinContacts = await vault.settings.get('autoJoinContacts', true);
+  S.sosKeep = await vault.settings.get('sosKeep', '3h'); setSosRetention(S.sosKeep);
+  S.pin = await vault.settings.get('pin', null);
+  S.lockAfter = await vault.settings.get('lockAfter', '1m');
+  if (S.pin) showLock();
+  document.addEventListener('visibilitychange', () => {
+    if (!S.pin) return;
+    if (document.hidden) S.hiddenAt = Date.now();
+    else if (S.hiddenAt && Date.now() - S.hiddenAt >= (LOCK_AFTER[S.lockAfter] ?? 60e3)) showLock();
+  });
   document.documentElement.dataset.plate = S.plate;
   $('#my-id').textContent = S.identity.id;
   $('#platform').textContent = platform;
 
   await loadContacts();
   S.messages = (await vault.list('message')).slice(-200);
-  await vault.scheduleNightlyPurge((r) => { if (r === 'wiped') location.reload(); else if (r > 0) toast(`Nightly purge: ${r} expired item(s) removed`); });
+  await vault.scheduleNightlyPurge((r) => { if (r === 'wiped') location.reload(); else if (r > 0) toast(`${r} expired item(s) removed`); });
+  warmRelay(CONFIG.relayUrl);
   startMailbox();
   globalThis.wekonetDesktop?.onPurge(() => vault.purgeExpired());
 
@@ -53,6 +65,7 @@ function go(view) {
   for (const b of document.querySelectorAll('[data-nav]')) b.setAttribute('aria-current', b.dataset.nav === view ? 'page' : 'false');
   const root = $('#view');
   root.replaceChildren(VIEWS[view]());
+  if (S.call && view !== 'call') root.prepend(inCallStrip());
   root.focus({ preventScroll: true });
   if (view === 'map') mountMap();
 }
@@ -71,6 +84,54 @@ function modal(title, body, actions) {
   document.body.append(dlg);
   dlg.showModal();
   return dlg;
+}
+
+// ============================================================ app lock
+function showLock() {
+  if (document.querySelector('.lockscreen')) return;
+  document.documentElement.dataset.locked = '1';
+  const input = h('input', { type: 'password', inputmode: 'numeric', autocomplete: 'off', maxlength: 8, placeholder: 'PIN', 'aria-label': 'PIN' });
+  const msg = h('p', { class: 'muted', text: 'Enter your PIN to open WeKoNet.' });
+  const btn = h('button', { class: 'btn btn-primary btn-xl', type: 'button', text: 'Unlock' });
+  const screen = h('div', { class: 'lockscreen', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'WeKoNet is locked' },
+    h('div', { class: 'lock-card' }, h('h2', { text: 'WeKoNet is locked' }), msg, input, btn));
+  const attempt = async () => {
+    btn.disabled = true;
+    if (await checkPin(input.value, S.pin)) {
+      await vault.settings.set('pinFails', 0);
+      screen.remove(); delete document.documentElement.dataset.locked; S.hiddenAt = null;
+      return;
+    }
+    const fails = (await vault.settings.get('pinFails', 0)) + 1;
+    await vault.settings.set('pinFails', fails);
+    input.value = '';
+    if (fails >= MAX_FAILS) { await vault.wipeAll(); location.reload(); return; }
+    msg.textContent = `Wrong PIN. ${MAX_FAILS - fails} tries left before WeKoNet erases itself.`;
+    setTimeout(() => { btn.disabled = false; input.focus(); }, Math.min(fails, 5) * 1000);
+  };
+  btn.addEventListener('click', attempt);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !btn.disabled) attempt(); });
+  document.body.append(screen);
+  setTimeout(() => input.focus(), 0);
+}
+
+function pinDialog({ title, needCurrent, onDone }) {
+  const cur = needCurrent ? h('input', { type: 'password', inputmode: 'numeric', maxlength: 8, placeholder: 'Current PIN', 'aria-label': 'Current PIN' }) : null;
+  const p1 = onDone.remove ? null : h('input', { type: 'password', inputmode: 'numeric', maxlength: 8, placeholder: 'New PIN (4–8 digits)', 'aria-label': 'New PIN' });
+  const p2 = onDone.remove ? null : h('input', { type: 'password', inputmode: 'numeric', maxlength: 8, placeholder: 'Repeat new PIN', 'aria-label': 'Repeat new PIN' });
+  modal(title, h('div', { class: 'stack' }, cur, p1, p2,
+    h('p', { class: 'muted', text: `Ten wrong PINs in a row erase WeKoNet on this device.` })), [
+    ['Save', async () => {
+      if (cur && !(await checkPin(cur.value, S.pin))) return toast('Current PIN is wrong', 'danger');
+      if (onDone.remove) { S.pin = null; await vault.settings.set('pin', null); toast('App lock removed'); return refresh('settings'); }
+      if (!validPin(p1.value)) return toast('Use 4 to 8 digits', 'warn');
+      if (p1.value !== p2.value) return toast('The PINs do not match', 'warn');
+      S.pin = await makePinRecord(p1.value);
+      await vault.settings.set('pin', S.pin); await vault.settings.set('pinFails', 0);
+      toast('App lock is on'); refresh('settings');
+    }, 'btn-primary'],
+    ['Cancel', null, 'btn-ghost'],
+  ]);
 }
 
 // ============================================================ contacts + mailbox
@@ -115,30 +176,54 @@ async function saveContact(peer) {
 async function hostCall({ mode, max, linger, ttl }) {
   if (S.call) return toast('End the current call first', 'warn');
   try {
-    const b = await createBeacon({ identity: S.identity, signalUrl: CONFIG.relayUrl, appBase: CONFIG.appBase, mode, linger, ttlMinutes: ttl, maxPeers: max });
+    const b = await createBeacon({ identity: S.identity, signalUrl: CONFIG.relayUrl, defaultRelay: CONFIG.relayUrl, appBase: CONFIG.appBase, mode, linger, ttlMinutes: ttl, maxPeers: max });
     S.beacon = b; S.role = 'host';
+    b.shortLink = await makeShortLink(b);
     await vault.save('beacon', { room: b.payload.room, mode, max, linger }, { meta: { exp: b.payload.exp } });
     await startCall(b, 'host', mode);
     showShare(b);
   } catch (e) { toast(e.message, 'danger'); }
 }
 
+/** Park a sealed copy of the beacon on the relay → a ~47-character link. Falls back to the full link. */
+async function makeShortLink(b) {
+  try {
+    const s = await sealShort(b.fragment);
+    await relayRequest(CONFIG.relayUrl, { op: 'stash', id: s.id, data: s.data, exp: b.payload.exp }, 'stashed', { maxWaitMs: 20e3 });
+    return `${CONFIG.appBase}#${s.code}`;
+  } catch { return null; }
+}
+
 function showShare(b) {
-  const text = `Join my private WeKoNet ${b.payload.mode} call (end-to-end encrypted, expires in ${Math.round((b.payload.exp - Date.now()) / 60e3)} min): ${b.link}`;
+  const link = b.shortLink || b.link;
+  const text = `Join my private WeKoNet ${b.payload.mode} call (end-to-end encrypted, expires in ${Math.round((b.payload.exp - Date.now()) / 60e3)} min): ${link}`;
   modal('Send your beacon', h('div', {},
     h('p', { text: 'Anyone with this link can join until it expires or the call ends. Send it only to the people you want in the call.' }),
-    h('code', { class: 'beacon-link', text: b.link }),
+    h('code', { class: 'beacon-link', text: link }),
     h('p', { class: 'muted', text: 'The encryption key is after the “#”: it never reaches any server.' })), [
     ['WhatsApp', () => shareToWhatsApp(text), 'btn-wa'],
     ['Share…', () => shareNative(text)],
-    ['Copy link', () => navigator.clipboard?.writeText(b.link).then(() => toast('Copied'))],
+    ['Copy link', () => navigator.clipboard?.writeText(link).then(() => toast('Copied'))],
+    ...(b.shortLink ? [['Copy full link', () => navigator.clipboard?.writeText(b.link).then(() => toast('Full link copied — works even if the relay restarts'))]] : []),
     ['Done', null, 'btn-ghost'],
   ]);
 }
 
 async function receiveBeacon(frag) {
   let o;
-  try { o = await openBeacon(frag); } catch (e) { return toast(e.message, 'danger'); }
+  try {
+    const k = parseShort(frag);
+    if (k) {
+      toast('Opening short link…');
+      const r = await relayRequest(CONFIG.relayUrl, { op: 'fetch', id: await shortId(k) }, 'stash').catch((e) => {
+        throw new Error(e.relayCode === 'no-such-link'
+          ? 'This short link has expired or the relay restarted. Ask for a new beacon or the full link.'
+          : `Cannot reach the WeKoNet relay (${new URL(CONFIG.relayUrl).host}).`);
+      });
+      frag = await openShort(k, r.data);
+    }
+    o = await openBeacon(frag, Date.now(), { defaultRelay: CONFIG.relayUrl });
+  } catch (e) { return toast(e.message, 'danger'); }
   if (S.call) return toast('Finish the current call before joining another', 'warn');
   const contact = S.contacts.find((c) => c.pub === o.payload.from);
   const firstRun = !(await vault.settings.get('kept', false)) && S.contacts.length === 0;
@@ -188,6 +273,7 @@ async function startCall(beacon, role, mode) {
   call.addEventListener('error', (e) => toast(e.detail.message, 'danger'));
   call.addEventListener('ended', () => onCallEnded());
   await call.start(mode);
+  keepAlive(true, `WeKoNet ${modeLabel(mode).toLowerCase()} · ${lingerLabel(beacon.payload.linger)}`);
   if (S.view !== 'call') go('call');
 }
 
@@ -234,11 +320,12 @@ async function onCallEnded() {
   S.call = null; S.peers.clear(); S.localStream = null; S.deadline = null;
   for (const k of [...videoCache.keys()]) dropVideo(k);
   S.sharer.stop();
+  keepAlive(false);
   if (failed) { go('connect'); return; } // join failed: no "keep / remove" prompt
   refresh('call');
   if (wasGuest) {
     modal('Call ended — beacon expired', h('p', { text: 'Keep WeKoNet on this device? If you remove it, every key, message and setting is erased now.' }), [
-      ['Keep WeKoNet', async () => { await vault.settings.set('guest', false); await vault.settings.set('kept', true); toast('WeKoNet kept. Your history auto-deletes after 3 years.'); }, 'btn-primary'],
+      ['Keep WeKoNet', async () => { await vault.settings.set('guest', false); await vault.settings.set('kept', true); toast('WeKoNet kept. Your history auto-deletes after 3 hours.'); }, 'btn-primary'],
       ['Remove everything', async () => { await vault.wipeAll(); document.body.replaceChildren(h('main', { class: 'goodbye' }, h('h1', { text: 'WeKoNet removed' }), h('p', { text: 'All keys and data were erased. You can uninstall the app or close this page.' }))); }, 'btn-danger'],
     ]);
   } else if (peers.some((p) => !S.contacts.some((c) => c.wid === p.id))) {
@@ -291,6 +378,20 @@ const lingerLabel = (l) => ({ end: 'ends with the call', '1h': 'open 1 hour', '2
 
 function refresh(view) { if (S.view === view) go(view); }
 
+function endCall() {
+  if (!S.call) return;
+  S.call.end(S.role === 'host'); // the host ends it for everyone; a guest just leaves
+}
+
+/** Shown at the top of Connect / Chat / Map / Settings while a call is open. */
+function inCallStrip() {
+  return h('div', { class: 'incall' },
+    h('span', { class: 'incall-dot' }),
+    h('span', { class: 'incall-text', text: `${modeLabel(S.call.payload.mode)} in progress` }),
+    h('button', { class: 'btn btn-sm', type: 'button', text: 'Open', onclick: () => go('call') }),
+    h('button', { class: 'btn btn-danger btn-sm', type: 'button', text: 'End', 'aria-label': 'End call', onclick: endCall }));
+}
+
 function seg(name, options, initial) {
   const wrap = h('div', { class: 'seg', role: 'radiogroup', 'aria-label': name });
   for (const [val, label] of options) {
@@ -317,6 +418,7 @@ function dropVideo(key) { const v = videoCache.get(key); if (v) { v.srcObject = 
 const VIEWS = {
   connect() {
     const form = h('section', { class: 'card hero' },
+      h('p', { class: 'tagline', text: 'WeKoNet — the Disposable Chat Software' }),
       h('h2', { text: 'Start a WeKoNet call' }),
       h('p', { class: 'muted', text: 'No phone number. No email. A one-time encrypted beacon is the only way in.' }),
       h('div', { class: 'field' }, h('span', { class: 'label', text: 'Type' }), seg('mode', [['voice', 'Voice'], ['video', 'Video'], ['chat', 'Chat']], 'video')),
@@ -382,11 +484,12 @@ const VIEWS = {
       h('button', { class: `ctl ${camOn ? '' : 'off'}`, type: 'button', 'aria-label': 'Camera', text: camOn ? 'Cam' : 'Cam off', onclick: (e) => { camOn = !camOn; S.call.toggleCam(camOn); e.currentTarget.textContent = camOn ? 'Cam' : 'Cam off'; e.currentTarget.classList.toggle('off', !camOn); } }),
       h('button', { class: 'ctl', type: 'button', text: 'Flip', 'aria-label': 'Switch camera', onclick: () => S.call.switchCamera() }),
       h('button', { class: 'ctl', type: 'button', text: 'Chat', onclick: () => go('chat') }),
-      h('button', { class: 'ctl end', type: 'button', text: 'End', 'aria-label': 'End call', onclick: () => S.call.end(S.role === 'host') }));
+      h('button', { class: 'ctl end', type: 'button', text: 'End', 'aria-label': 'End call', onclick: endCall }));
 
     const status = h('div', { class: 'callbar' },
       h('span', { class: 'lock', text: E2EE_MEDIA ? 'E2EE · X25519 + P-384 + ML-KEM-768' : 'DTLS-SRTP only on this device' }),
-      h('span', { text: S.deadline ? `Open until ${new Date(S.deadline).toLocaleTimeString()}` : lingerLabel(S.call.payload.linger) }));
+      h('span', { text: S.deadline ? `Open until ${new Date(S.deadline).toLocaleTimeString()}` : lingerLabel(S.call.payload.linger) }),
+      h('button', { class: 'btn btn-danger btn-sm', type: 'button', text: S.role === 'host' ? 'End for all' : 'Leave', 'aria-label': 'End call', onclick: endCall }));
 
     const save = [...S.peers.values()].filter((p) => !S.contacts.some((c) => c.wid === p.id)).map((p) =>
       h('button', { class: 'btn btn-sm', type: 'button', text: `Save connection: ${p.name}`, onclick: () => saveContact(p) }));
@@ -464,10 +567,27 @@ const VIEWS = {
       h('section', { class: 'card' }, h('h2', { text: 'Privacy' }),
         toggle('Hide my IP address', 'hideIp', S.hideIp, 'Route calls through the TURN relay so peers never see your IP (slightly higher latency).'),
         toggle('Auto-join saved connections', 'autoJoinContacts', S.autoJoinContacts, 'Beacons from saved, known contacts open straight into the call.')),
+      h('section', { class: 'card' }, h('h2', { text: 'App lock' }),
+        h('p', { class: 'muted', text: S.pin ? 'WeKoNet asks for your PIN when it opens and after it has been in the background.' : 'Protect WeKoNet with a PIN in case someone picks up your unlocked phone or computer.' }),
+        S.pin ? h('div', { class: 'field' }, h('span', { class: 'label', text: 'Lock after leaving the app' }), (() => {
+          const w = seg('lockAfter', [['now', 'Immediately'], ['1m', '1 min'], ['5m', '5 min']], S.lockAfter);
+          w.addEventListener('change', async () => { S.lockAfter = segVal(w, 'lockAfter'); await vault.settings.set('lockAfter', S.lockAfter); });
+          return w;
+        })()) : null,
+        h('div', { class: 'row wrap' }, S.pin
+          ? [h('button', { class: 'btn', type: 'button', text: 'Change PIN', onclick: () => pinDialog({ title: 'Change PIN', needCurrent: true, onDone: {} }) }),
+            h('button', { class: 'btn', type: 'button', text: 'Lock now', onclick: showLock }),
+            h('button', { class: 'btn btn-ghost', type: 'button', text: 'Remove PIN', onclick: () => pinDialog({ title: 'Remove app lock', needCurrent: true, onDone: { remove: true } }) })]
+          : h('button', { class: 'btn btn-primary', type: 'button', text: 'Set a PIN', onclick: () => pinDialog({ title: 'Set a PIN', needCurrent: false, onDone: {} }) }))),
       h('section', { class: 'card' }, h('h2', { text: 'History & self-purge' }),
+        h('div', { class: 'field' }, h('span', { class: 'label', text: 'Keep SOS records for' }), (() => {
+          const w = seg('sosKeep', [['3h', '3 hours'], ['7d', '7 days'], ['30d', '30 days']], S.sosKeep);
+          w.addEventListener('change', async () => { S.sosKeep = segVal(w, 'sosKeep'); setSosRetention(S.sosKeep); await vault.settings.set('sosKeep', S.sosKeep); });
+          return w;
+        })()),
         h('ul', { class: 'facts' },
-          h('li', { text: 'History is encrypted on this device and deleted automatically after 3 years.' }),
-          h('li', { text: 'Every night at 1:00 AM WeKoNet purges expired beacons, old location trails and temporary data (or everything, on a guest install).' }),
+          h('li', { text: 'Messages, calls and location trails are encrypted on this device and deleted automatically after 3 hours. SOS records follow the setting above.' }),
+          h('li', { text: 'Expired items are removed every few minutes. Every night at 1:00 AM WeKoNet also purges expired beacons, location trails and temporary data (or everything, on a guest install).' }),
           h('li', { text: 'Beacons expire when the call ends unless you chose 1 hr, 2 hr, all day or keep live.' })),
         h('div', { class: 'row wrap' },
           h('button', { class: 'btn', type: 'button', text: 'Purge expired now', onclick: async () => toast(`Removed ${await vault.purgeExpired()} item(s)`) }),

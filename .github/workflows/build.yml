@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '${{ env.NODE_VERSION }}', cache: npm }
+        with: { node-version: '${{ env.NODE_VERSION }}' }
       - run: npm install --no-audit --no-fund
       - run: npm audit --omit=dev --audit-level=high
       - name: Crypto, MITM and relay tests (real ML-KEM-768)
@@ -52,15 +52,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '${{ env.NODE_VERSION }}', cache: npm }
+        with: { node-version: '${{ env.NODE_VERSION }}' }
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '21' }
       - run: npm install --no-audit --no-fund
       - run: npm run cap:android
-      - name: Build release APK (not debuggable)
-        working-directory: android
-        run: ./gradlew assembleRelease --no-daemon
-      - name: Sign APK
+      - name: Build release APK and Play Store bundle (never a debug build)
         working-directory: android
         env:
           KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -68,26 +65,34 @@ jobs:
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
+          set -e
           if [ "$HAS_KEYSTORE" = "true" ]; then
             echo "$KS_B64" | base64 -d > release.jks
           else
-            # No signing secrets: sign with a one-off key so the APK installs.
-            # Add ANDROID_KEYSTORE_* secrets to keep one permanent key (needed for updates).
-            echo "::warning::No ANDROID_KEYSTORE_BASE64 secret - signing with a temporary key"
-            KS_PASS=$(openssl rand -hex 24); KEY_PASS=$KS_PASS; KEY_ALIAS=wekonet
-            keytool -genkeypair -v -keystore release.jks -alias "$KEY_ALIAS" -keyalg EC -groupname secp384r1 \
-              -validity 10000 -storepass "$KS_PASS" -keypass "$KEY_PASS" -dname "CN=WeKoNet, O=WeKoNet"
+            # No signing secrets yet: sign with a throwaway key so the APK is still a
+            # release (non-debuggable) build. Updates will not install over it.
+            echo "::warning title=Temporary signing key::Add the ANDROID_KEYSTORE_* secrets so every APK is signed with the same permanent key."
+            KS_PASS=$(openssl rand -hex 16); KEY_PASS=$KS_PASS; KEY_ALIAS=temp
+            keytool -genkeypair -keystore release.jks -storetype PKCS12 -alias temp -keyalg RSA -keysize 2048 -validity 365 \
+              -storepass "$KS_PASS" -keypass "$KEY_PASS" -dname "CN=WeKoNet temporary"
           fi
+          ./gradlew assembleRelease bundleRelease --no-daemon
           BT=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)
-          $BT/zipalign -p -f 4 app/build/outputs/apk/release/app-release-unsigned.apk aligned.apk
-          VERSION=$(node -p "require('../package.json').version")
-          mkdir -p ../out
-          KS_PASS="$KS_PASS" KEY_PASS="$KEY_PASS" $BT/apksigner sign --ks release.jks --ks-pass env:KS_PASS \
-            --ks-key-alias "$KEY_ALIAS" --key-pass env:KEY_PASS --out "../out/WeKoNet-$VERSION-android.apk" aligned.apk
-          $BT/apksigner verify --print-certs "../out/WeKoNet-$VERSION-android.apk"
+          $BT/zipalign -f -p 4 app/build/outputs/apk/release/app-release-unsigned.apk aligned.apk
+          $BT/apksigner sign --ks release.jks --ks-pass env:KS_PASS --ks-key-alias "$KEY_ALIAS" --key-pass env:KEY_PASS \
+            --out ../WeKoNet.apk aligned.apk
+          $BT/apksigner verify ../WeKoNet.apk
+          if [ "$HAS_KEYSTORE" = "true" ]; then
+            jarsigner -keystore release.jks -storepass "$KS_PASS" -keypass "$KEY_PASS" \
+              -signedjar ../WeKoNet-playstore.aab app/build/outputs/bundle/release/app-release.aab "$KEY_ALIAS"
+          fi
           rm -f release.jks aligned.apk
+      - run: |
+          mkdir -p out
+          cp WeKoNet.apk out/
+          cp WeKoNet-playstore.aab out/ 2>/dev/null || true
       - uses: actions/upload-artifact@v4
-        with: { name: wekonet-android, path: out/*.apk }
+        with: { name: wekonet-android, path: out/* }
 
   ios:
     needs: test-and-web
@@ -95,15 +100,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '${{ env.NODE_VERSION }}', cache: npm }
+        with: { node-version: '${{ env.NODE_VERSION }}' }
       - run: npm install --no-audit --no-fund
       - run: npm run cap:ios
       - name: Build unsigned IPA (sign with your Apple Developer account to install)
         run: |
           cd ios/App
-          xcodebuild -project App.xcodeproj -scheme App -configuration Release -sdk iphoneos \
+          if [ -d App.xcworkspace ]; then SRC="-workspace App.xcworkspace"; else SRC="-project App.xcodeproj"; fi
+          set -o pipefail
+          xcodebuild $SRC -scheme App -configuration Release -sdk iphoneos \
             -archivePath $PWD/build/WeKoNet.xcarchive archive \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" 2>&1 | tee build.log \
+            || { echo "::error title=Xcode build failed::$(grep -E 'error:|BUILD FAILED' build.log | tail -n 25 | tr -d '\r' | sed -e ':a;N;$!ba;s/\n/%0A/g')"; exit 1; }
           mkdir -p Payload && cp -R build/WeKoNet.xcarchive/Products/Applications/App.app Payload/
           zip -qr ../../WeKoNet-ios-unsigned.ipa Payload
       - uses: actions/upload-artifact@v4
@@ -115,12 +123,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '${{ env.NODE_VERSION }}', cache: npm }
+        with: { node-version: '${{ env.NODE_VERSION }}' }
       - run: npm install --no-audit --no-fund
-      - run: npm run dist:win
+      - name: Package (win)
+        shell: bash
+        run: |
+          # No signing certificate configured -> build unsigned (an empty CSC_LINK makes electron-builder fail)
+          if [ -z "$CSC_LINK" ]; then unset CSC_LINK CSC_KEY_PASSWORD; fi
+          set +e; npm run dist:win 2>&1 | tee build.log; s=${PIPESTATUS[0]}
+          if [ $s -ne 0 ]; then echo "::error title=Build failed::$(tail -n 60 build.log | tr -d '\r' | sed -e 's/%/%25/g' | sed -e ':a;N;$!ba;s/\n/%0A/g')"; fi
+          exit $s
         env:
           CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+      - name: Launch test — start the packaged Windows app
+        shell: bash
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1
+          set +e; node scripts/smoke-electron.mjs release/win-unpacked/WeKoNet.exe 2>&1 | tee smoke.log; s=${PIPESTATUS[0]}
+          if [ $s -ne 0 ]; then echo "::error title=Launch test failed::$(tail -n 40 smoke.log | tr -d '\r' | sed -e 's/%/%25/g' | sed -e ':a;N;$!ba;s/\n/%0A/g')"; fi
+          exit $s
       - uses: actions/upload-artifact@v4
         with: { name: wekonet-windows, path: release/*.exe }
 
@@ -130,9 +152,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '${{ env.NODE_VERSION }}', cache: npm }
+        with: { node-version: '${{ env.NODE_VERSION }}' }
       - run: npm install --no-audit --no-fund
-      - run: npm run dist:pi
+      - name: Package (pi)
+        shell: bash
+        run: |
+          set +e; npm run dist:pi 2>&1 | tee build.log; s=${PIPESTATUS[0]}
+          if [ $s -ne 0 ]; then echo "::error title=Build failed::$(tail -n 60 build.log | tr -d '\r' | sed -e 's/%/%25/g' | sed -e ':a;N;$!ba;s/\n/%0A/g')"; fi
+          exit $s
+      - name: Launch test — start the packaged Raspberry Pi app
+        shell: bash
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1
+          set +e; xvfb-run -a node scripts/smoke-electron.mjs release/linux-arm64-unpacked/wekonet 2>&1 | tee smoke.log; s=${PIPESTATUS[0]}
+          if [ $s -ne 0 ]; then echo "::error title=Launch test failed::$(tail -n 40 smoke.log | tr -d '\r' | sed -e 's/%/%25/g' | sed -e ':a;N;$!ba;s/\n/%0A/g')"; fi
+          exit $s
       - uses: actions/upload-artifact@v4
         with:
           name: wekonet-raspberry-pi
@@ -146,9 +180,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '${{ env.NODE_VERSION }}', cache: npm }
+        with: { node-version: '${{ env.NODE_VERSION }}' }
       - run: npm install --no-audit --no-fund
-      - run: npm run dist:linux
+      - name: Package (linux)
+        shell: bash
+        run: |
+          set +e; npm run dist:linux 2>&1 | tee build.log; s=${PIPESTATUS[0]}
+          if [ $s -ne 0 ]; then echo "::error title=Build failed::$(tail -n 60 build.log | tr -d '\r' | sed -e 's/%/%25/g' | sed -e ':a;N;$!ba;s/\n/%0A/g')"; fi
+          exit $s
+      - name: Launch test — start the packaged Linux app
+        shell: bash
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1
+          set +e; xvfb-run -a node scripts/smoke-electron.mjs release/linux-unpacked/wekonet 2>&1 | tee smoke.log; s=${PIPESTATUS[0]}
+          if [ $s -ne 0 ]; then echo "::error title=Launch test failed::$(tail -n 40 smoke.log | tr -d '\r' | sed -e 's/%/%25/g' | sed -e ':a;N;$!ba;s/\n/%0A/g')"; fi
+          exit $s
       - uses: actions/upload-artifact@v4
         with:
           name: wekonet-linux-x64
@@ -162,6 +208,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Lowercase image owner (GHCR requires lowercase)
+        run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
       - uses: docker/login-action@v3
         with: { registry: ghcr.io, username: '${{ github.actor }}', password: '${{ secrets.GITHUB_TOKEN }}' }
       - uses: docker/build-push-action@v6
@@ -169,7 +217,7 @@ jobs:
           context: .
           file: deploy/Dockerfile.relay
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/wekonet-relay:latest
+          tags: ghcr.io/${{ env.OWNER }}/wekonet-relay:latest
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -184,6 +232,7 @@ jobs:
           generate_release_notes: true
           files: |
             artifacts/**/*.apk
+            artifacts/**/*.aab
             artifacts/**/*.ipa
             artifacts/**/*.exe
             artifacts/**/*.AppImage

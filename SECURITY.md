@@ -5,7 +5,7 @@
 - **Network attacker / MITM** — defeated by TLS to the relay, AES-GCM-sealed signaling, signed handshake transcripts, key confirmation, beacon identity pinning and the 6-word SAS check.
 - **Future quantum adversary recording traffic today** — ML-KEM-768 is mixed into every session key.
 - **Script injection (XSS)** — strict CSP + Trusted Types + sanitizer; private keys are non-extractable CryptoKeys, so even injected code cannot export them.
-- **Device seized later** — per-message ratchet wipes old keys; history is encrypted at rest and expires after 3 years; guest installs self-wipe.
+- **Device seized later** — per-message ratchet wipes old keys; history is encrypted at rest and expires after 3 hours; guest installs self-wipe.
 
 ## Out of scope / residual risk
 - A compromised device OS, malicious keyboard or screen-recorder (Android builds set `FLAG_SECURE`).
