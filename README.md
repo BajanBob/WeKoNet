@@ -36,9 +36,15 @@ People are identified by a **WeKoNet ID** (`WKN-XXXX-XXXX-XXXX-XXXX`) derived fr
 
 All of this is covered by tests: `npm test` (handshake, tampering, impostor, forged MAC, beacon forgery/expiry, ratchet replay, frame tamper, relay admission/cap/expiry, mailbox purge).
 
+## Running in the background
+While a call or beacon room is open (every *Keep connection open* option: until the call ends, 1 hr, 2 hr, all day or keep live), WeKoNet stays connected when you leave the app, like WhatsApp:
+- **Android** shows a "WeKoNet is connected" notification and keeps running until the call or beacon ends.
+- **Windows / Linux / Raspberry Pi**: closing the window hides WeKoNet to the tray; use *Quit WeKoNet* in the tray menu to end it.
+- **iOS** keeps an active call running in the background (audio/VoIP mode); an idle open beacon may be paused by iOS.
+
 ## Retention & self-purge
-- History (messages, calls, SOS) is kept **at most 3 years**, then deleted.
-- **Every night at 01:00** the app purges expired beacons, lingering rooms, location trails older than 24 h and temporary data; a **guest install wipes everything**. If the app was closed at 01:00 the purge runs on next launch. The relay purges idle rooms and all stored mail at 01:00 too.
+- History (messages, calls, SOS) and location trails are kept **at most 3 hours**, then deleted. Expired items disappear from the app at once and are deleted by a sweep every 5 minutes.
+- **Every night at 01:00** the app purges expired beacons, lingering rooms, location trails older than 3 h and temporary data; a **guest install wipes everything**. If the app was closed at 01:00 the purge runs on next launch. The relay purges idle rooms and all stored mail at 01:00 too.
 
 ## SOS help mode
 The red **SOS** button sends your live GPS position every 20 s — encrypted — to everyone in the current call **and** to every saved connection's mailbox. Their device sounds a siren, vibrates and opens the map at your location with an "Open in maps" link. Saved connections are created after a call with **Save connection**.

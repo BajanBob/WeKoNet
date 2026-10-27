@@ -1,4 +1,4 @@
-// Minimal, frozen bridge. The page gets exactly two callbacks — nothing else
+// Minimal, frozen bridge. The page gets two callbacks and one on/off switch — nothing else
 // from Node or Electron is reachable from web content.
 const { contextBridge, ipcRenderer } = require('electron');
 
@@ -9,4 +9,5 @@ contextBridge.exposeInMainWorld('wekonetDesktop', Object.freeze({
     });
   },
   onPurge(cb) { ipcRenderer.on('wekonet:purge', () => cb()); },
+  setKeepAlive(on) { ipcRenderer.send('wekonet:keep-alive', on === true); },
 }));

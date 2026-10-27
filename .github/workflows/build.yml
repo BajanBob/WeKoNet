@@ -85,9 +85,12 @@ jobs:
       - name: Build unsigned IPA (sign with your Apple Developer account to install)
         run: |
           cd ios/App
-          xcodebuild -project App.xcodeproj -scheme App -configuration Release -sdk iphoneos \
+          if [ -d App.xcworkspace ]; then SRC="-workspace App.xcworkspace"; else SRC="-project App.xcodeproj"; fi
+          set -o pipefail
+          xcodebuild $SRC -scheme App -configuration Release -sdk iphoneos \
             -archivePath $PWD/build/WeKoNet.xcarchive archive \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" 2>&1 | tee build.log \
+            || { echo "::error title=Xcode build failed::$(grep -E 'error:|BUILD FAILED' build.log | tail -n 25 | tr -d '\r' | sed -e ':a;N;$!ba;s/\n/%0A/g')"; exit 1; }
           mkdir -p Payload && cp -R build/WeKoNet.xcarchive/Products/Applications/App.app Payload/
           zip -qr ../../WeKoNet-ios-unsigned.ipa Payload
       - uses: actions/upload-artifact@v4
@@ -101,7 +104,14 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '${{ env.NODE_VERSION }}' }
       - run: npm install --no-audit --no-fund
-      - run: npm run dist:win
+      - name: Package (win)
+        shell: bash
+        run: |
+          # No signing certificate configured -> build unsigned (an empty CSC_LINK makes electron-builder fail)
+          if [ -z "$CSC_LINK" ]; then unset CSC_LINK CSC_KEY_PASSWORD; fi
+          set +e; npm run dist:win 2>&1 | tee build.log; s=${PIPESTATUS[0]}
+          if [ $s -ne 0 ]; then echo "::error title=Build failed::$(tail -n 60 build.log | tr -d '\r' | sed -e 's/%/%25/g' | sed -e ':a;N;$!ba;s/\n/%0A/g')"; fi
+          exit $s
         env:
           CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
@@ -116,7 +126,12 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '${{ env.NODE_VERSION }}' }
       - run: npm install --no-audit --no-fund
-      - run: npm run dist:pi
+      - name: Package (pi)
+        shell: bash
+        run: |
+          set +e; npm run dist:pi 2>&1 | tee build.log; s=${PIPESTATUS[0]}
+          if [ $s -ne 0 ]; then echo "::error title=Build failed::$(tail -n 60 build.log | tr -d '\r' | sed -e 's/%/%25/g' | sed -e ':a;N;$!ba;s/\n/%0A/g')"; fi
+          exit $s
       - uses: actions/upload-artifact@v4
         with:
           name: wekonet-raspberry-pi
@@ -132,7 +147,12 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '${{ env.NODE_VERSION }}' }
       - run: npm install --no-audit --no-fund
-      - run: npm run dist:linux
+      - name: Package (linux)
+        shell: bash
+        run: |
+          set +e; npm run dist:linux 2>&1 | tee build.log; s=${PIPESTATUS[0]}
+          if [ $s -ne 0 ]; then echo "::error title=Build failed::$(tail -n 60 build.log | tr -d '\r' | sed -e 's/%/%25/g' | sed -e ':a;N;$!ba;s/\n/%0A/g')"; fi
+          exit $s
       - uses: actions/upload-artifact@v4
         with:
           name: wekonet-linux-x64
@@ -146,6 +166,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Lowercase image owner (GHCR requires lowercase)
+        run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
       - uses: docker/login-action@v3
         with: { registry: ghcr.io, username: '${{ github.actor }}', password: '${{ secrets.GITHUB_TOKEN }}' }
       - uses: docker/build-push-action@v6
@@ -153,7 +175,7 @@ jobs:
           context: .
           file: deploy/Dockerfile.relay
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/wekonet-relay:latest
+          tags: ghcr.io/${{ env.OWNER }}/wekonet-relay:latest
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')

@@ -14,7 +14,7 @@ import { contactLinks, sealMail, openMail } from './crypto/contact.js';
 import { CallSession, E2EE_MEDIA } from './net/mesh.js';
 import { MailboxClient } from './net/signaling.js';
 import { LocationSharer, SOSBeacon, playSiren, SHARE_DURATIONS } from './features/geo.js';
-import { onBeacon, shareToWhatsApp, shareNative, platform } from './platform.js';
+import { onBeacon, shareToWhatsApp, shareNative, platform, keepAlive } from './platform.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -37,7 +37,7 @@ async function boot() {
 
   await loadContacts();
   S.messages = (await vault.list('message')).slice(-200);
-  await vault.scheduleNightlyPurge((r) => { if (r === 'wiped') location.reload(); else if (r > 0) toast(`Nightly purge: ${r} expired item(s) removed`); });
+  await vault.scheduleNightlyPurge((r) => { if (r === 'wiped') location.reload(); else if (r > 0) toast(`${r} expired item(s) removed`); });
   startMailbox();
   globalThis.wekonetDesktop?.onPurge(() => vault.purgeExpired());
 
@@ -188,6 +188,7 @@ async function startCall(beacon, role, mode) {
   call.addEventListener('error', (e) => toast(e.detail.message, 'danger'));
   call.addEventListener('ended', () => onCallEnded());
   await call.start(mode);
+  keepAlive(true, `WeKoNet ${modeLabel(mode).toLowerCase()} · ${lingerLabel(beacon.payload.linger)}`);
   if (S.view !== 'call') go('call');
 }
 
@@ -232,10 +233,11 @@ async function onCallEnded() {
   const peers = [...S.peers.values()];
   S.call = null; S.peers.clear(); S.localStream = null; S.deadline = null;
   S.sharer.stop();
+  keepAlive(false);
   refresh('call');
   if (wasGuest) {
     modal('Call ended — beacon expired', h('p', { text: 'Keep WeKoNet on this device? If you remove it, every key, message and setting is erased now.' }), [
-      ['Keep WeKoNet', async () => { await vault.settings.set('guest', false); await vault.settings.set('kept', true); toast('WeKoNet kept. Your history auto-deletes after 3 years.'); }, 'btn-primary'],
+      ['Keep WeKoNet', async () => { await vault.settings.set('guest', false); await vault.settings.set('kept', true); toast('WeKoNet kept. Your history auto-deletes after 3 hours.'); }, 'btn-primary'],
       ['Remove everything', async () => { await vault.wipeAll(); document.body.replaceChildren(h('main', { class: 'goodbye' }, h('h1', { text: 'WeKoNet removed' }), h('p', { text: 'All keys and data were erased. You can uninstall the app or close this page.' }))); }, 'btn-danger'],
     ]);
   } else if (peers.some((p) => !S.contacts.some((c) => c.wid === p.id))) {
@@ -452,8 +454,8 @@ const VIEWS = {
         toggle('Auto-join saved connections', 'autoJoinContacts', S.autoJoinContacts, 'Beacons from saved, known contacts open straight into the call.')),
       h('section', { class: 'card' }, h('h2', { text: 'History & self-purge' }),
         h('ul', { class: 'facts' },
-          h('li', { text: 'History is encrypted on this device and deleted automatically after 3 years.' }),
-          h('li', { text: 'Every night at 1:00 AM WeKoNet purges expired beacons, old location trails and temporary data (or everything, on a guest install).' }),
+          h('li', { text: 'History (messages, calls, SOS) is encrypted on this device and deleted automatically after 3 hours.' }),
+          h('li', { text: 'Expired items are removed every few minutes. Every night at 1:00 AM WeKoNet also purges expired beacons, location trails and temporary data (or everything, on a guest install).' }),
           h('li', { text: 'Beacons expire when the call ends unless you chose 1 hr, 2 hr, all day or keep live.' })),
         h('div', { class: 'row wrap' },
           h('button', { class: 'btn', type: 'button', text: 'Purge expired now', onclick: async () => toast(`Removed ${await vault.purgeExpired()} item(s)`) }),

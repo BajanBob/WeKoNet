@@ -17,9 +17,9 @@
     "cap:android": "npm run build && npx cap add android && node scripts/patch-android.mjs && npx cap sync android",
     "cap:ios": "npm run build && npx cap add ios && node scripts/patch-ios.mjs && npx cap sync ios",
     "electron": "npm run build && electron .",
-    "dist:win": "npm run build && electron-builder --win nsis portable --x64",
-    "dist:pi": "npm run build && electron-builder --linux AppImage deb --arm64",
-    "dist:linux": "npm run build && electron-builder --linux AppImage deb --x64"
+    "dist:win": "npm run build && electron-builder --win nsis portable --x64 --publish never",
+    "dist:pi": "npm run build && electron-builder --linux AppImage deb --arm64 --publish never",
+    "dist:linux": "npm run build && electron-builder --linux AppImage deb --x64 --publish never"
   },
   "dependencies": {
     "@capacitor/android": "^7.0.0",
@@ -49,6 +49,7 @@
     "linux": {
       "icon": "resources/icon.png",
       "category": "Network",
+      "maintainer": "WeKoNet",
       "artifactName": "WeKoNet-${version}-${arch}.${ext}",
       "mimeTypes": ["x-scheme-handler/wekonet"]
     }

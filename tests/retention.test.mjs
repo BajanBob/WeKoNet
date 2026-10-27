@@ -1,18 +1,24 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isExpired, next1am, purgeOverdue, HISTORY_MS } from '../src/storage/retention.js';
+import { isExpired, next1am, purgeOverdue, HISTORY_MS, LOCATION_MS } from '../src/storage/retention.js';
 import { contactLinks, sealMail, openMail } from '../src/crypto/contact.js';
 import { generateIdentity } from '../src/crypto/identity.js';
 import { randomBytes } from '../src/crypto/util.js';
 
 const DAY = 86400e3;
 
-test('retention: history kept 3 years, location 24 h, beacons until expiry', () => {
+test('retention: history and location kept 3 hours, beacons until expiry', () => {
   const now = Date.UTC(2026, 9, 26);
-  assert.equal(isExpired({ type: 'message', createdAt: now - (HISTORY_MS - DAY) }, now), false);
-  assert.equal(isExpired({ type: 'message', createdAt: now - (HISTORY_MS + DAY) }, now), true);
-  assert.equal(isExpired({ type: 'sos', createdAt: now - 2 * 365 * DAY }, now), false);
-  assert.equal(isExpired({ type: 'location', createdAt: now - 25 * 3600e3 }, now), true);
+  const MIN = 60e3, HOUR = 3600e3;
+  assert.equal(HISTORY_MS, 3 * HOUR);
+  assert.equal(LOCATION_MS, 3 * HOUR);
+  assert.equal(isExpired({ type: 'message', createdAt: now - (HISTORY_MS - MIN) }, now), false);
+  assert.equal(isExpired({ type: 'message', createdAt: now - (HISTORY_MS + MIN) }, now), true);
+  assert.equal(isExpired({ type: 'call', createdAt: now - 4 * HOUR }, now), true);
+  assert.equal(isExpired({ type: 'sos', createdAt: now - 2 * HOUR }, now), false);
+  assert.equal(isExpired({ type: 'sos', createdAt: now - DAY }, now), true);
+  assert.equal(isExpired({ type: 'location', createdAt: now - 2 * HOUR }, now), false);
+  assert.equal(isExpired({ type: 'location', createdAt: now - 4 * HOUR }, now), true);
   assert.equal(isExpired({ type: 'beacon', exp: now + 1000 }, now), false);
   assert.equal(isExpired({ type: 'beacon', exp: now - 1 }, now), true);
   assert.equal(isExpired({ type: 'temp', createdAt: now }, now), true);
