@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '${{ env.NODE_VERSION }}', cache: npm }
+        with: { node-version: '${{ env.NODE_VERSION }}' }
       - run: npm install --no-audit --no-fund
       - run: npm audit --omit=dev --audit-level=high
       - name: Crypto, MITM and relay tests (real ML-KEM-768)
@@ -43,7 +43,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '${{ env.NODE_VERSION }}', cache: npm }
+        with: { node-version: '${{ env.NODE_VERSION }}' }
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '21' }
       - run: npm install --no-audit --no-fund
@@ -79,7 +79,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '${{ env.NODE_VERSION }}', cache: npm }
+        with: { node-version: '${{ env.NODE_VERSION }}' }
       - run: npm install --no-audit --no-fund
       - run: npm run cap:ios
       - name: Build unsigned IPA (sign with your Apple Developer account to install)
@@ -99,7 +99,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '${{ env.NODE_VERSION }}', cache: npm }
+        with: { node-version: '${{ env.NODE_VERSION }}' }
       - run: npm install --no-audit --no-fund
       - run: npm run dist:win
         env:
@@ -114,7 +114,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '${{ env.NODE_VERSION }}', cache: npm }
+        with: { node-version: '${{ env.NODE_VERSION }}' }
       - run: npm install --no-audit --no-fund
       - run: npm run dist:pi
       - uses: actions/upload-artifact@v4
@@ -130,7 +130,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '${{ env.NODE_VERSION }}', cache: npm }
+        with: { node-version: '${{ env.NODE_VERSION }}' }
       - run: npm install --no-audit --no-fund
       - run: npm run dist:linux
       - uses: actions/upload-artifact@v4
