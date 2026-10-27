@@ -8,6 +8,7 @@ services:
     security_opt: ["no-new-privileges:true"]
     environment:
       ALLOWED_ORIGINS: "https://wekonet.app,capacitor://localhost,https://localhost,app://wekonet"
+      TRUST_PROXY: "1"
   caddy:
     image: caddy:2
     restart: unless-stopped

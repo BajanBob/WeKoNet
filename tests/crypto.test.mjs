@@ -90,7 +90,7 @@ test('MITM: forged key-confirmation MAC is rejected', async () => {
 test('beacon: create → open round-trip; tamper, forgery and expiry fail', async () => {
   const id = await generateIdentity();
   const b = await createBeacon({ identity: id, signalUrl: 'wss://relay.example/ws', mode: 'video', linger: '2h', maxPeers: 3 });
-  assert.match(b.link, /^https:\/\/wekonet\.app\/b\/#v1\./);
+  assert.match(b.link, /^https:\/\/wekonet-relay\.onrender\.com\/b\/#v1\./);
   const o = await openBeacon(b.link);
   assert.equal(o.payload.room, b.payload.room);
   assert.equal(o.payload.max, 3);

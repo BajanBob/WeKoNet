@@ -1,7 +1,7 @@
 // Token beacons: the ONLY way a WeKoNet call starts.
 //
 // A beacon is a link such as
-//     https://wekonet.app/b/#v1.<256-bit key>.<AES-256-GCM ciphertext>
+//     https://wekonet-relay.onrender.com/b/#v1.<256-bit key>.<AES-256-GCM ciphertext>
 // sent over WhatsApp (or any messenger). Everything after "#" is a URL
 // fragment, which browsers and apps never transmit to any server — so the
 // relay never sees the key, the room, or who sent the invite.
@@ -32,11 +32,11 @@ export async function roomKeys(beaconKey) {
 }
 
 export async function createBeacon({
-  identity, signalUrl, appBase = 'https://wekonet.app/b/', mode = 'video',
+  identity, signalUrl, appBase = 'https://wekonet-relay.onrender.com/b/', mode = 'video',
   linger = 'end', ttlMinutes = 30, maxPeers = 2, label = '',
 }) {
   if (!MODES.includes(mode)) throw new Error('bad mode');
-  if (!(linger in LINGER)) throw new Error('bad linger');
+  if (!Object.hasOwn(LINGER, linger)) throw new Error('bad linger');
   if (maxPeers < 2 || maxPeers > 3) throw new Error('WeKoNet calls are limited to 3 people');
   const beaconKey = randomBytes(32); // AES-256
   const now = Date.now();
@@ -71,7 +71,7 @@ export async function openBeacon(linkOrFragment, now = Date.now()) {
   if (!(await verify(from, unb64u(s), lp('beacon', body)))) throw new Error('Beacon signature invalid');
   if ((await wekonetId(from)) !== payload.fromId) throw new Error('Beacon identity mismatch');
   if (now > payload.exp) throw new Error('This beacon has expired');
-  if (!MODES.includes(payload.mode) || !(payload.linger in LINGER)) throw new Error('bad beacon fields');
+  if (!MODES.includes(payload.mode) || !Object.hasOwn(LINGER, payload.linger)) throw new Error('bad beacon fields');
   if (!/^wss:\/\//.test(payload.sig) && !/^ws:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//.test(payload.sig)) {
     throw new Error('Beacon relay must use wss:// (TLS)');
   }

@@ -1,5 +1,5 @@
 // Platform glue: receives beacon links from wherever they arrive.
-//   • Web / PWA / Raspberry Pi browser: https://wekonet.app/b/#v1...
+//   • Web / PWA / Raspberry Pi browser: https://wekonet-relay.onrender.com/b/#v1...
 //   • Android / iOS (Capacitor):  App Links / Universal Links + wekonet:// scheme
 //   • Windows / Linux (Electron): wekonet:// protocol handler via preload bridge
 import { Capacitor } from '@capacitor/core';

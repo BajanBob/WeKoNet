@@ -31,5 +31,6 @@ export async function openMail(links, data, maxAgeMs = 24 * 3600e3) {
   if (Date.now() - env.t > maxAgeMs) throw new Error('stale mail');
   if (seen.has(env.n)) throw new Error('replayed mail');
   seen.add(env.n);
+  if (seen.size > 5000) seen.delete(seen.values().next().value); // bounded; stale mail is rejected by age anyway
   return env;
 }

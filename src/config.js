@@ -4,11 +4,12 @@
 const env = import.meta.env || {};
 
 export const CONFIG = {
-  relayUrl: env.VITE_RELAY_URL || 'wss://relay.wekonet.app/ws',
-  appBase: env.VITE_APP_BASE || 'https://wekonet.app/b/',
+  relayUrl: env.VITE_RELAY_URL || 'wss://wekonet-relay.onrender.com/ws',
+  appBase: env.VITE_APP_BASE || 'https://wekonet-relay.onrender.com/b/',
   tileUrl: env.VITE_TILE_URL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+  // Public STUN works for most home / mobile networks. For strict NATs add a
+  // TURN server via VITE_ICE_SERVERS (media stays end-to-end encrypted through it).
   iceServers: JSON.parse(env.VITE_ICE_SERVERS || JSON.stringify([
-    { urls: ['stun:turn.wekonet.app:3478'] },
-    { urls: ['turns:turn.wekonet.app:5349'], username: 'wekonet', credential: 'change-me' },
+    { urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] },
   ])),
 };

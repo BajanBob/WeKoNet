@@ -34,7 +34,7 @@ People are identified by a **WeKoNet ID** (`WKN-XXXX-XXXX-XXXX-XXXX`) derived fr
 5. SDP (which carries the DTLS fingerprints) travels inside the authenticated session, binding DTLS-SRTP to the verified identities.
 6. Relay URL must be `wss://`; CSP pins the app to *your* relay host only.
 
-All of this is covered by tests: `npm test` (handshake, tampering, impostor, forged MAC, beacon forgery/expiry, ratchet replay, frame tamper, relay admission/cap/expiry, mailbox purge).
+All of this is covered by tests: `npm test` (crypto fuzzing, hostile-relay and load tests) and `npm run test:e2e` (real-browser attacks) (handshake, tampering, impostor, forged MAC, beacon forgery/expiry, ratchet replay, frame tamper, relay admission/cap/expiry, mailbox purge).
 
 ## Retention & self-purge
 - History (messages, calls, SOS) is kept **at most 3 years**, then deleted.
@@ -54,7 +54,7 @@ npm test                      # crypto + MITM + relay tests
 npm run dev                   # web dev server
 npm run build                 # production web build (CSP injected)
 
-npm run cap:android           # then: cd android && ./gradlew assembleDebug
+npm run cap:android           # then: cd android && ./gradlew assembleRelease
 npm run cap:ios               # then open ios/App in Xcode, set Team, Archive
 npm run dist:win              # Windows NSIS installer + portable .exe
 npm run dist:pi               # Raspberry Pi arm64 .deb + AppImage
@@ -64,6 +64,15 @@ npm run relay                 # run the relay locally (ws://127.0.0.1:8787/ws)
 Or push a tag (`git tag v1.0.0 && git push --tags`) and **GitHub Actions** builds and publishes everything (see below).
 
 ## Deploy the relay
+
+### Render (current setup: `wss://wekonet-relay.onrender.com/ws`)
+The app is built to use this relay by default. `render.yaml` holds the service settings:
+- **Start command:** `node server/relay.js` · **Health check:** `/healthz`
+- **Environment:** `HOST=0.0.0.0`, `MAX_CONN_PER_IP=2000`, `PENDING_ROOMS_PER_IP=2000`, `NEW_BOXES_PER_HOUR=20000` (Render's proxy hides client IPs, so these act as service-wide limits), optional `DOWNLOAD_URL` (your APK link, shown on the beacon page) and `ANDROID_CERT_SHA256` (lets beacon links open the app directly).
+- Beacon links look like `https://wekonet-relay.onrender.com/b/#v1…` — the relay serves a small page there that opens the app (or offers the download). The key after `#` never reaches the server.
+- Calls use public STUN by default. If calls fail between some networks (strict mobile carriers), add a TURN service in the `VITE_ICE_SERVERS` secret.
+
+### Your own server
 `deploy/docker-compose.yml` runs Caddy (automatic TLS, serves the web app and beacon landing page with security headers), the relay, and coturn. Edit the hostnames in `deploy/Caddyfile`, `deploy/turnserver.conf` and your `.env`, then `docker compose up -d`. Publish `public/.well-known/assetlinks.json` and `apple-app-site-association` with your signing fingerprints so beacon links open the app directly.
 
 ## GitHub output files
@@ -71,8 +80,7 @@ Released by `.github/workflows/build.yml` on every `v*` tag:
 
 | File | Platform |
 |---|---|
-| `WeKoNet-android-debug.apk` | Android (sideload) |
-| `WeKoNet-release.apk` | Android, signed (when `ANDROID_KEYSTORE_*` secrets are set) |
+| `WeKoNet-1.0.0-android.apk` | Android — release build, signed (your key from `ANDROID_KEYSTORE_*` secrets, or a temporary key if none is set) |
 | `WeKoNet-ios-unsigned.ipa` | iOS — must be signed with your Apple Developer account |
 | `WeKoNet-1.0.0-x64-nsis.exe` | Windows installer |
 | `WeKoNet-1.0.0-x64-portable.exe` | Windows portable |

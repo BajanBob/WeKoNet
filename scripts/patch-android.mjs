@@ -2,6 +2,7 @@
 // security hardening to the generated Android project.
 import fs from 'node:fs';
 
+const APP_HOST = new URL(process.env.VITE_APP_BASE || 'https://wekonet-relay.onrender.com/b/').host;
 const manifestPath = 'android/app/src/main/AndroidManifest.xml';
 let m = fs.readFileSync(manifestPath, 'utf8');
 
@@ -19,13 +20,13 @@ for (const p of perms) {
 }
 m = m.replace('</manifest>', '    <uses-feature android:name="android.hardware.camera" android:required="false" />\n</manifest>');
 
-// Beacon deep links: https://wekonet.app/b/... (verified App Link) + wekonet://b
+// Beacon deep links: https://<APP_HOST>/b/... (App Link) + wekonet://b
 const filters = `
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:host="wekonet.app" android:pathPrefix="/b" />
+                <data android:scheme="https" android:host="${APP_HOST}" android:pathPrefix="/b" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />

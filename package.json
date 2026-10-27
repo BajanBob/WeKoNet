@@ -2,7 +2,7 @@
   "name": "wekonet",
   "productName": "WeKoNet",
   "version": "1.0.0",
-  "description": "WeKoNet Connect — beacon-initiated, end-to-end encrypted P2P voice, video, chat, location sharing and SOS for up to 3 people.",
+  "description": "WeKoNet Connect \u2014 beacon-initiated, end-to-end encrypted P2P voice, video, chat, location sharing and SOS for up to 3 people.",
   "type": "module",
   "main": "electron/main.cjs",
   "license": "AGPL-3.0-or-later",
@@ -19,7 +19,8 @@
     "electron": "npm run build && electron .",
     "dist:win": "npm run build && electron-builder --win nsis portable --x64",
     "dist:pi": "npm run build && electron-builder --linux AppImage deb --arm64",
-    "dist:linux": "npm run build && electron-builder --linux AppImage deb --x64"
+    "dist:linux": "npm run build && electron-builder --linux AppImage deb --x64",
+    "test:e2e": "node tests/e2e/attack.e2e.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^7.0.0",
@@ -36,21 +37,44 @@
     "electron": "^37.0.0",
     "electron-builder": "^26.0.0",
     "plist": "^3.1.0",
-    "vite": "^7.0.0"
+    "vite": "^7.0.0",
+    "playwright": "^1.50.0"
   },
   "build": {
     "appId": "app.wekonet.connect",
     "productName": "WeKoNet",
-    "directories": { "output": "release" },
-    "files": ["dist/**", "electron/**", "package.json"],
-    "protocols": [{ "name": "WeKoNet Beacon", "schemes": ["wekonet"] }],
-    "win": { "icon": "resources/icon.png", "artifactName": "WeKoNet-${version}-${arch}-${target}.${ext}" },
-    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "perMachine": false },
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "electron/**",
+      "package.json"
+    ],
+    "protocols": [
+      {
+        "name": "WeKoNet Beacon",
+        "schemes": [
+          "wekonet"
+        ]
+      }
+    ],
+    "win": {
+      "icon": "resources/icon.png",
+      "artifactName": "WeKoNet-${version}-${arch}-${target}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false
+    },
     "linux": {
       "icon": "resources/icon.png",
       "category": "Network",
       "artifactName": "WeKoNet-${version}-${arch}.${ext}",
-      "mimeTypes": ["x-scheme-handler/wekonet"]
+      "mimeTypes": [
+        "x-scheme-handler/wekonet"
+      ]
     }
   }
 }

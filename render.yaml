@@ -1,0 +1,31 @@
+# Render Blueprint for the WeKoNet relay (Dashboard → Blueprints → New → this repo).
+# If you created the service by hand, copy these settings into it instead.
+services:
+  - type: web
+    name: wekonet-relay
+    runtime: node
+    plan: starter            # paid plan: no sleeping, so beacons connect instantly
+    buildCommand: "true"     # the relay has zero dependencies
+    startCommand: node server/relay.js
+    healthCheckPath: /healthz
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: NODE_VERSION
+        value: "22"
+      # Apps allowed to connect (Android, iOS, desktop, web)
+      - key: ALLOWED_ORIGINS
+        value: https://localhost,capacitor://localhost,app://wekonet,https://wekonet-relay.onrender.com
+      # Render's proxy hides client IPs, so per-IP limits act as service-wide limits:
+      - key: MAX_CONN_PER_IP
+        value: "2000"
+      - key: PENDING_ROOMS_PER_IP
+        value: "2000"
+      - key: NEW_BOXES_PER_HOUR
+        value: "20000"
+      # Optional: link to your APK for the beacon landing page's download button
+      - key: DOWNLOAD_URL
+        sync: false
+      # Optional: release-key SHA-256 so beacon links open the app directly (Android App Links)
+      - key: ANDROID_CERT_SHA256
+        sync: false

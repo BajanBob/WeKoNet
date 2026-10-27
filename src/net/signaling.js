@@ -59,7 +59,9 @@ export class Signaling extends EventTarget {
       case 'mail': return this.#emit('mail', m);
       case 'signal': {
         const aad = lp(this.keys.roomTag, m.from, this.peer);
-        const obj = await openJSON(this.keys.sigKey, unb64u(m.data), aad);
+        let obj;
+        try { obj = await openJSON(this.keys.sigKey, unb64u(m.data), aad); }
+        catch { return this.#emit('tampered', { from: m.from }); } // failed AES-GCM authentication
         return this.#emit('signal', { from: m.from, msg: obj });
       }
       default: return undefined;

@@ -180,7 +180,7 @@ async function startCall(beacon, role, mode) {
     refresh('call');
   });
   call.addEventListener('remote-track', (e) => { const p = S.peers.get(e.detail.peer); if (p) { p.stream = e.detail.stream; refresh('call'); } });
-  call.addEventListener('peer-left', (e) => { const p = S.peers.get(e.detail.peer); S.peers.delete(e.detail.peer); S.map?.remove(e.detail.peer); if (p) toast(`${p.name} left (${e.detail.reason})`); refresh('call'); });
+  call.addEventListener('peer-left', (e) => { const p = S.peers.get(e.detail.peer); S.peers.delete(e.detail.peer); dropVideo(e.detail.peer); S.map?.remove(e.detail.peer); if (p) toast(`${p.name} left (${e.detail.reason})`); refresh('call'); });
   call.addEventListener('message', (e) => onPeerMessage(e.detail));
   call.addEventListener('room', (e) => { S.deadline = e.detail.deadline; refresh('call'); });
   call.addEventListener('security', (e) => toast(`Security: ${e.detail.message}`, 'danger'));
@@ -228,10 +228,13 @@ async function sendChat(text) {
 }
 
 async function onCallEnded() {
+  const failed = S.call?.failed;
   const wasGuest = await vault.settings.get('guest', false);
   const peers = [...S.peers.values()];
   S.call = null; S.peers.clear(); S.localStream = null; S.deadline = null;
+  for (const k of [...videoCache.keys()]) dropVideo(k);
   S.sharer.stop();
+  if (failed) { go('connect'); return; } // join failed: no "keep / remove" prompt
   refresh('call');
   if (wasGuest) {
     modal('Call ended — beacon expired', h('p', { text: 'Keep WeKoNet on this device? If you remove it, every key, message and setting is erased now.' }), [
@@ -300,6 +303,17 @@ function seg(name, options, initial) {
 }
 const segVal = (root, name) => root.querySelector(`input[name="${name}"]:checked`)?.value;
 
+// Video elements are kept across re-renders so playback never restarts or blinks
+// when the screen updates (someone joins, words verified, a toast, …).
+const videoCache = new Map();
+function videoFor(key, stream, muted) {
+  let v = videoCache.get(key);
+  if (!v) { v = h('video', { class: 'tile-video', autoplay: true, playsinline: true, muted }); videoCache.set(key, v); }
+  if (stream && v.srcObject !== stream) v.srcObject = stream;
+  return v;
+}
+function dropVideo(key) { const v = videoCache.get(key); if (v) { v.srcObject = null; videoCache.delete(key); } }
+
 const VIEWS = {
   connect() {
     const form = h('section', { class: 'card hero' },
@@ -339,13 +353,13 @@ const VIEWS = {
         h('button', { class: 'btn btn-primary', type: 'button', text: 'Create a beacon', onclick: () => go('connect') })));
     }
     const tiles = h('div', { class: `grid n${1 + S.peers.size}` });
-    const me = h('video', { class: 'tile-video', autoplay: true, playsinline: true, muted: true });
-    if (S.localStream) me.srcObject = S.localStream;
-    tiles.append(h('figure', { class: 'tile me' }, me, h('figcaption', { text: 'You' })));
+    const me = videoFor('me', S.localStream, true);
+    const hasVideo = (st) => S.call.mode === 'video' && !!st?.getVideoTracks().length;
+    const initials = (n) => String(n).replace(/^WKN-/, '').slice(0, 2);
+    tiles.append(h('figure', { class: `tile me ${hasVideo(S.localStream) ? '' : 'novideo'}`, dataset: { initials: 'You' } }, me, h('figcaption', { text: 'You' })));
     for (const p of S.peers.values()) {
-      const v = h('video', { class: 'tile-video', autoplay: true, playsinline: true });
-      if (p.stream) v.srcObject = p.stream;
-      tiles.append(h('figure', { class: 'tile' }, v, h('figcaption', {},
+      const v = videoFor(p.peerId, p.stream, false);
+      tiles.append(h('figure', { class: `tile ${hasVideo(p.stream) ? '' : 'novideo'}`, dataset: { initials: initials(p.name) } }, v, h('figcaption', {},
         h('span', { text: p.name }),
         p.verified ? h('span', { class: 'badge ok', text: 'Verified' }) : h('span', { class: 'badge warn', text: 'Check words' }))));
     }
@@ -377,7 +391,7 @@ const VIEWS = {
     const save = [...S.peers.values()].filter((p) => !S.contacts.some((c) => c.wid === p.id)).map((p) =>
       h('button', { class: 'btn btn-sm', type: 'button', text: `Save connection: ${p.name}`, onclick: () => saveContact(p) }));
 
-    return h('div', { class: 'stack call' }, status, tiles, waiting, ...verify, ctl, save.length ? h('div', { class: 'row wrap' }, save) : null);
+    return h('div', { class: 'stack call' }, status, tiles, waiting, ctl, save.length ? h('div', { class: 'row wrap save-row' }, save) : null, ...verify);
   },
 
   chat() {

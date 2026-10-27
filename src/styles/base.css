@@ -38,7 +38,7 @@ p { margin: .35rem 0; }
 .id-chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 10px var(--ok); flex: none; }
 
 /* ---------- main ---------- */
-#view { max-width: 760px; margin: 0 auto; padding: 16px; outline: none; }
+#view { max-width: 760px; margin: 0 auto; padding: 16px 16px 40px; outline: none; }
 .stack { display: grid; gap: 14px; }
 .card {
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
@@ -129,6 +129,12 @@ html[data-sos="on"] .sos-fab {
 @media (min-width: 640px) { .grid.n2 { grid-template-columns: 1fr 1fr; } .grid.n3 { grid-template-columns: repeat(3, 1fr); } .grid.n3 .tile.me { grid-column: auto; } }
 .tile { position: relative; margin: 0; border-radius: var(--radius); overflow: hidden; background: #000; aspect-ratio: 4 / 3; border: 1px solid var(--line); }
 .tile.me { aspect-ratio: 16 / 9; }
+.tile.novideo { aspect-ratio: 5 / 2; background: radial-gradient(circle at 50% 40%, var(--accent-soft), transparent 70%), var(--surface-2); }
+.tile.novideo .tile-video { display: none; }
+.tile.novideo::before {
+  content: attr(data-initials); position: absolute; inset: 0; display: grid; place-items: center;
+  font: 800 2.2rem/1 var(--font); color: var(--accent); letter-spacing: .04em;
+}
 .tile-video { width: 100%; height: 100%; object-fit: cover; display: block; }
 .tile.me .tile-video { transform: scaleX(-1); }
 .tile figcaption {

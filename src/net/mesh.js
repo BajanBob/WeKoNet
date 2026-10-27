@@ -44,8 +44,17 @@ export class CallSession extends EventTarget {
     sig.addEventListener('joined', (e) => this.#onJoined(e.detail));
     sig.addEventListener('peer-left', (e) => this.#dropPeer(e.detail.peer, 'left'));
     sig.addEventListener('ended', () => this.end(false));
-    sig.addEventListener('relay-error', (e) => this.emit('error', { message: relayError(e.detail.code) }));
+    sig.addEventListener('relay-error', (e) => {
+      this.emit('error', { message: relayError(e.detail.code, this.payload.max) });
+      // Joining failed for good → tear the session down instead of hanging.
+      if (FATAL.has(e.detail.code) && this.peers.size === 0) { this.failed = true; this.end(false); }
+    });
     sig.addEventListener('warning', (e) => this.emit('warning', e.detail));
+    sig.addEventListener('tampered', () => {
+      const now = Date.now();
+      if (now - (this.lastTamper || 0) > 8000) this.emit('security', { message: 'Data arriving through the relay was altered (possible attack). It was rejected — do not trust this connection.' });
+      this.lastTamper = now;
+    });
     // Process signaling strictly in arrival order (handshake → SDP → ICE).
     this.queue = Promise.resolve();
     sig.addEventListener('signal', (e) => {
@@ -175,7 +184,11 @@ export class CallSession extends EventTarget {
 
     // Data channel (pre-negotiated, same id on both sides → no in-band DCEP race)
     p.dc = pc.createDataChannel('wekonet', { negotiated: true, id: 0, ordered: true });
-    p.dc.onopen = () => this.emit('channel-open', { peer: peerId });
+    p.dc.onopen = async () => {
+      // flush anything typed before the channel finished opening (in order)
+      for (const [kind, body] of (p.outbox || []).splice(0)) p.dc.send(JSON.stringify(await encryptMsg(p.tx, kind, body)));
+      this.emit('channel-open', { peer: peerId });
+    };
     p.dc.onmessage = async (e) => {
       try {
         if (typeof e.data !== 'string' || e.data.length > 65536) return;
@@ -240,7 +253,13 @@ export class CallSession extends EventTarget {
   // ---------- messaging ----------
   async sendTo(peerId, kind, body) {
     const p = this.peers.get(peerId);
-    if (!p?.dc || p.dc.readyState !== 'open') return false;
+    if (!p) return false;
+    if (!p.dc || p.dc.readyState !== 'open' || p.outbox?.length) {
+      // Not open yet: queue (bounded) instead of silently dropping.
+      (p.outbox ||= []).push([kind, body]);
+      if (p.outbox.length > 200) p.outbox.shift();
+      return 'queued';
+    }
     p.dc.send(JSON.stringify(await encryptMsg(p.tx, kind, body)));
     return true;
   }
@@ -255,6 +274,8 @@ export class CallSession extends EventTarget {
   #fail(peerId, err) {
     this.emit('security', { peer: peerId, message: err.message });
     this.#dropPeer(peerId, err.message);
+    // A guest whose only counterpart failed authentication must not stay in that room.
+    if (this.role === 'guest' && this.payload.max === 2 && this.peers.size === 0) { this.failed = true; this.end(false); }
   }
 
   #dropPeer(peerId, reason) {
@@ -275,7 +296,9 @@ export class CallSession extends EventTarget {
     for (const id of [...this.peers.keys()]) this.#dropPeer(id, 'call ended');
     this.local?.getTracks().forEach((t) => t.stop());
     this.worker?.terminate();
-    if (forAll || this.payload.linger === 'end') this.sig?.endForAll(); else this.sig?.leave();
+    // Only an explicit host 'end for everyone' kills the room. Otherwise we just leave;
+    // the relay retires the beacon when the last person leaves (linger 'end').
+    if (forAll && !this.failed) this.sig?.endForAll(); else this.sig?.leave();
     setTimeout(() => this.sig?.close(), 200);
     this.beacon.beaconKey?.fill(0); // token beacon expires locally too
     this.emit('ended', {});
@@ -292,9 +315,12 @@ function preferCodec(tr, kind) {
   } catch { /* browser default */ }
 }
 
-function relayError(code) {
+const FATAL = new Set(['room-full', 'no-such-beacon', 'beacon-expired', 'room-exists', 'too-many-beacons']);
+
+function relayError(code, max) {
   return ({
-    'room-full': 'This WeKoNet call already has 3 people.',
+    'room-full': max === 3 ? 'This WeKoNet call already has 3 people.' : 'This WeKoNet call is already full.',
+    'too-many-beacons': 'Too many open beacons from this network. Try again later.',
     'no-such-beacon': 'This beacon has ended or is invalid.',
     'beacon-expired': 'This beacon has expired.',
     'room-exists': 'Beacon already in use.',

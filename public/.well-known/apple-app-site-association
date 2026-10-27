@@ -1,0 +1,5 @@
+{
+  "applinks": {
+    "details": [{ "appIDs": ["REPLACE_TEAMID.app.wekonet.connect"], "components": [{ "/": "/b/*" }] }]
+  }
+}

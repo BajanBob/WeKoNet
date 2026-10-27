@@ -13,8 +13,8 @@ permissions:
 
 env:
   NODE_VERSION: 22
-  VITE_RELAY_URL: ${{ vars.VITE_RELAY_URL || 'wss://relay.wekonet.app/ws' }}
-  VITE_APP_BASE: ${{ vars.VITE_APP_BASE || 'https://wekonet.app/b/' }}
+  VITE_RELAY_URL: ${{ vars.VITE_RELAY_URL || 'wss://wekonet-relay.onrender.com/ws' }}
+  VITE_APP_BASE: ${{ vars.VITE_APP_BASE || 'https://wekonet-relay.onrender.com/b/' }}
   VITE_TILE_URL: ${{ vars.VITE_TILE_URL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png' }}
   VITE_ICE_SERVERS: ${{ secrets.VITE_ICE_SERVERS }}
 
@@ -32,6 +32,15 @@ jobs:
       - run: npm run build
       - name: Enforce CSP / no inline script / no unsafe DOM sinks
         run: node scripts/check-csp.mjs
+      - name: Browser attack tests (3-person call, MITM relay, injection, outage, offline SOS)
+        env:
+          VITE_RELAY_URL: ws://127.0.0.1:8787/ws
+          VITE_APP_BASE: http://127.0.0.1:5173/b/
+          VITE_ICE_SERVERS: '[]'
+        run: |
+          npx vite build --outDir dist-e2e
+          npx playwright install --with-deps chromium
+          WEKONET_SITE=dist-e2e npm run test:e2e
       - uses: actions/upload-artifact@v4
         with: { name: wekonet-web, path: dist }
 
@@ -48,11 +57,10 @@ jobs:
         with: { distribution: temurin, java-version: '21' }
       - run: npm install --no-audit --no-fund
       - run: npm run cap:android
-      - name: Build debug APK
+      - name: Build release APK (not debuggable)
         working-directory: android
-        run: ./gradlew assembleDebug --no-daemon
-      - name: Build signed release APK (if signing secrets are set)
-        if: env.HAS_KEYSTORE == 'true'
+        run: ./gradlew assembleRelease --no-daemon
+      - name: Sign APK
         working-directory: android
         env:
           KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -60,16 +68,24 @@ jobs:
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          echo "$KS_B64" | base64 -d > release.jks
-          ./gradlew assembleRelease --no-daemon
+          if [ "$HAS_KEYSTORE" = "true" ]; then
+            echo "$KS_B64" | base64 -d > release.jks
+          else
+            # No signing secrets: sign with a one-off key so the APK installs.
+            # Add ANDROID_KEYSTORE_* secrets to keep one permanent key (needed for updates).
+            echo "::warning::No ANDROID_KEYSTORE_BASE64 secret - signing with a temporary key"
+            KS_PASS=$(openssl rand -hex 24); KEY_PASS=$KS_PASS; KEY_ALIAS=wekonet
+            keytool -genkeypair -v -keystore release.jks -alias "$KEY_ALIAS" -keyalg EC -groupname secp384r1 \
+              -validity 10000 -storepass "$KS_PASS" -keypass "$KEY_PASS" -dname "CN=WeKoNet, O=WeKoNet"
+          fi
           BT=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)
-          $BT/zipalign -p 4 app/build/outputs/apk/release/app-release-unsigned.apk aligned.apk
-          $BT/apksigner sign --ks release.jks --ks-pass env:KS_PASS --ks-key-alias "$KEY_ALIAS" --key-pass env:KEY_PASS --out app/build/outputs/apk/release/WeKoNet-release.apk aligned.apk
-          rm release.jks
-      - run: |
-          mkdir -p out
-          cp android/app/build/outputs/apk/debug/app-debug.apk out/WeKoNet-android-debug.apk
-          cp android/app/build/outputs/apk/release/WeKoNet-release.apk out/ 2>/dev/null || true
+          $BT/zipalign -p -f 4 app/build/outputs/apk/release/app-release-unsigned.apk aligned.apk
+          VERSION=$(node -p "require('../package.json').version")
+          mkdir -p ../out
+          KS_PASS="$KS_PASS" KEY_PASS="$KEY_PASS" $BT/apksigner sign --ks release.jks --ks-pass env:KS_PASS \
+            --ks-key-alias "$KEY_ALIAS" --key-pass env:KEY_PASS --out "../out/WeKoNet-$VERSION-android.apk" aligned.apk
+          $BT/apksigner verify --print-certs "../out/WeKoNet-$VERSION-android.apk"
+          rm -f release.jks aligned.apk
       - uses: actions/upload-artifact@v4
         with: { name: wekonet-android, path: out/*.apk }
 
@@ -173,4 +189,3 @@ jobs:
             artifacts/**/*.AppImage
             artifacts/**/*.deb
             WeKoNet-web.zip
-

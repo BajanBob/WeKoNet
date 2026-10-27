@@ -8,3 +8,4 @@ ios/
 *.keystore
 *.p12
 .DS_Store
+dist-e2e/

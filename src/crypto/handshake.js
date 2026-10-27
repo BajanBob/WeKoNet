@@ -104,7 +104,7 @@ export async function initiate({ identity, room, expectPeer = null }) {
     const peerPub = unb64u(reply.id);
     checkPin(expectPeer, peerPub);
     const th = await transcriptHash(hello, reply);
-    if (!(await verify(peerPub, unb64u(reply.s), th))) throw new Error('Responder signature invalid — possible man-in-the-middle');
+    if (!(await verify(peerPub, unb64u(reply.s), lp('sig reply', th)))) throw new Error('Responder signature invalid — possible man-in-the-middle');
     const ikm = concat(
       await x.derive(unb64u(reply.x)),
       await p.derive(unb64u(reply.p)),
@@ -114,7 +114,7 @@ export async function initiate({ identity, room, expectPeer = null }) {
     await checkMac(session.confirmPeer, th, unb64u(reply.m));
     const finish = {
       t: 'finish', v: V,
-      s: b64u(await sign(identity.privateKey, th)),
+      s: b64u(await sign(identity.privateKey, lp('sig finish', th))),
       m: b64u(await mac(session.confirmMine, th)),
     };
     return { finish, session };
@@ -138,12 +138,12 @@ export async function respond({ identity, room, hello, expectPeer = null }) {
   const th = await transcriptHash(hello, reply);
   const ikm = concat(await x.derive(unb64u(hello.x)), await p.derive(unb64u(hello.p)), enc.ss);
   const session = await deriveSession(ikm, th, 'R', peerPub);
-  reply.s = b64u(await sign(identity.privateKey, th));
+  reply.s = b64u(await sign(identity.privateKey, lp('sig reply', th)));
   reply.m = b64u(await mac(session.confirmMine, th));
 
   async function onFinish(fin) {
     if (fin.t !== 'finish' || fin.v !== V) throw new Error('unexpected handshake message');
-    if (!(await verify(peerPub, unb64u(fin.s), th))) throw new Error('Initiator transcript signature invalid — possible man-in-the-middle');
+    if (!(await verify(peerPub, unb64u(fin.s), lp('sig finish', th)))) throw new Error('Initiator transcript signature invalid — possible man-in-the-middle');
     await checkMac(session.confirmPeer, th, unb64u(fin.m));
     return session;
   }

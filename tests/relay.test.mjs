@@ -1,7 +1,7 @@
 // Integration test for the blind relay using Node's built-in WebSocket client.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { startRelay, nightlyPurge } from '../server/relay.js';
+import { startRelay } from '../server/relay.js';
 import { generateIdentity } from '../src/crypto/identity.js';
 import { createBeacon, openBeacon } from '../src/crypto/beacon.js';
 
@@ -63,7 +63,7 @@ test('relay: SOS mailbox delivers to subscriber, ack deletes, nightly purge clea
   assert.equal((await R.next()).data, 'sealed-sos');
   assert.equal((await S.next()).op, 'posted');
   S.send({ op: 'post', box, data: 'second' }); await S.next(); await R.next();
-  nightlyPurge();
+  server.nightlyPurge();
   const R2 = await client(); R2.send({ op: 'sub', boxes: [box] }); R2.send({ op: 'ping' });
   assert.equal((await R2.next()).op, 'pong', 'nothing stored after purge');
   for (const c of [R, S, R2]) c.close();
