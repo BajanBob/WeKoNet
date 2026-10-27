@@ -100,7 +100,7 @@ test('app lock: PIN required after reload, wrong PIN refused, right PIN unlocks'
   const A = await person(browser, 'user');
   await A.page.locator('nav [data-nav="settings"]').click();
   await A.page.getByRole('button', { name: 'Set a PIN' }).click();
-  await A.page.getByLabel('New PIN').fill('482915');
+  await A.page.getByLabel('New PIN', { exact: true }).fill('482915');
   await A.page.getByLabel('Repeat new PIN').fill('482915');
   await A.page.getByRole('button', { name: 'Save' }).click();
   await expect(A.page.getByRole('button', { name: 'Remove PIN' })).toBeVisible();
@@ -109,11 +109,11 @@ test('app lock: PIN required after reload, wrong PIN refused, right PIN unlocks'
   const lock = A.page.locator('.lockscreen');
   await expect(lock).toBeVisible();
   await expect(A.page.locator('main')).toBeHidden();
-  await A.page.getByLabel('PIN').fill('111111');
+  await A.page.getByLabel('PIN', { exact: true }).fill('111111');
   await A.page.getByRole('button', { name: 'Unlock' }).click();
   await expect(lock).toContainText('Wrong PIN. 9 tries left');
   await expect(A.page.getByRole('button', { name: 'Unlock' })).toBeEnabled({ timeout: 5e3 });
-  await A.page.getByLabel('PIN').fill('482915');
+  await A.page.getByLabel('PIN', { exact: true }).fill('482915');
   await A.page.getByRole('button', { name: 'Unlock' }).click();
   await expect(lock).toHaveCount(0);
   await expect(A.page.locator('#my-id')).toBeVisible();
