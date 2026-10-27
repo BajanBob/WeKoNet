@@ -9,3 +9,4 @@ ios/
 *.p12
 .DS_Store
 dist-e2e/
+test-results/

@@ -11,7 +11,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { startRelay } from '../../server/relay.js';
 import { Signaling } from '../../src/net/signaling.js';
-import { openBeacon } from '../../src/crypto/beacon.js';
+import { openBeacon, parseShort, shortId, openShort } from '../../src/crypto/beacon.js';
 import { generateIdentity } from '../../src/crypto/identity.js';
 import { respond } from '../../src/crypto/handshake.js';
 import { setKemProvider } from '../../src/crypto/kex.js';
@@ -112,6 +112,27 @@ async function waitToast(p, re, ms = 15000) {
   const t0 = Date.now();
   while (Date.now() - t0 < ms) { if (re.test(await toasts(p))) return; await sleep(150); }
   throw new Error(`[${p.tag}] expected toast ${re}, saw: ${JSON.stringify(await toasts(p))}`);
+}
+
+// Turn whatever link the app shared (full #v1/#v2 beacon or #s. short link) into
+// an opened beacon — exactly what someone holding the link could do.
+const RELAY_URL = `ws://127.0.0.1:${RELAY_PORT}/ws`;
+async function resolveLink(link) {
+  try { return await resolveLinkInner(link); } catch (e) { throw new Error(`${e.message} — link was: ${JSON.stringify(String(link).slice(0, 140))}`); }
+}
+async function resolveLinkInner(link) {
+  const k = parseShort(link);
+  if (!k) return openBeacon(link, Date.now(), { defaultRelay: RELAY_URL });
+  const id = await shortId(k);
+  const data = await new Promise((ok, fail) => {
+    const ws = new WebSocket(RELAY_URL);
+    ws.onopen = () => ws.send(JSON.stringify({ op: 'fetch', id }));
+    ws.onmessage = (e) => { const m = JSON.parse(e.data); ws.close(); m.op === 'stash' ? ok(m.data) : fail(new Error(`short link: ${m.code}`)); };
+    ws.onerror = () => fail(new Error('relay unreachable'));
+  });
+  const b = await openBeacon(await openShort(k, data), Date.now(), { defaultRelay: RELAY_URL });
+  b.short = { id, data };
+  return b;
 }
 
 async function hostBeacon(p, { mode = 'video', people = 2, linger = 'end' } = {}) {
@@ -244,9 +265,9 @@ await scenario('malicious relay #1: tampers with forwarded signaling → nobody 
 await scenario('malicious relay #2: attacker holding the leaked link impersonates the inviter → guest refuses', async () => {
   const A = await person('A');
   const link = await hostBeacon(A);
-  // The relay is diverted (simulated by restarting it). Mallory has the link and owns the room.
+  const leaked = await resolveLink(link); // Mallory reads the leaked link
+  // The relay is diverted (simulated by a fresh relay). Mallory owns the room there.
   await relayUp();
-  const leaked = await openBeacon(link);
   const mallory = await generateIdentity();
   const sig = new Signaling(leaked.payload.sig, leaked.keys);
   let gotHello = false;
@@ -260,6 +281,8 @@ await scenario('malicious relay #2: attacker holding the leaked link impersonate
   for (const ev of ['joined', 'peer-joined', 'relay-error', 'tampered', 'warning', 'closed']) sig.addEventListener(ev, (e) => trace.push(`${ev}:${JSON.stringify(e.detail)?.slice(0, 80)}`));
   await sig.connect();
   sig.create({ max: 2, linger: 'end', exp: leaked.payload.exp });
+  // A hostile relay can also serve the short link's sealed copy (it cannot read it).
+  if (leaked.short) sig.raw({ op: 'stash', id: leaked.short.id, data: leaked.short.data, exp: leaked.payload.exp });
   await sleep(300);
   const B = await person('B');
   await openLink(B, link);
