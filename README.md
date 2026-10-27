@@ -1,5 +1,7 @@
 # WeKoNet Connect
 
+**WeKoNet — the Disposable Chat Software.**
+
 Beacon-initiated, end-to-end encrypted **voice, video, chat, live location and SOS** for up to **3 people** — with no phone number, no email and no account.
 
 One codebase → **Android APK · iOS app · Windows .exe · Raspberry Pi (arm64 .deb / AppImage) · Linux · Web/PWA**.

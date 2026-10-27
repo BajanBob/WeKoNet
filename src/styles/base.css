@@ -120,7 +120,7 @@ html[data-sos="on"] .sos-fab {
 @keyframes sos { 50% { transform: scale(1.12); box-shadow: 0 0 0 16px color-mix(in srgb, var(--danger) 25%, transparent); } }
 
 /* ---------- call ---------- */
-.callbar { display: flex; justify-content: space-between; gap: 8px; font-size: .8rem; color: var(--muted); flex-wrap: wrap; }
+.callbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: .8rem; color: var(--muted); flex-wrap: wrap; }
 .lock { color: var(--ok); font-weight: 650; }
 .grid { display: grid; gap: 10px; }
 .grid.n2 { grid-template-columns: 1fr; }
@@ -199,3 +199,18 @@ html[data-sos="on"] .sos-fab {
 .goodbye { max-width: 520px; margin: 18vh auto; padding: 24px; text-align: center; }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* slogan */
+.tagline { margin: 0 0 4px; font-size: .8rem; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; color: var(--accent, currentColor); }
+
+/* call controls: End is always reachable */
+.callbar .btn-danger { margin-left: auto; }
+.incall {
+  position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 8px;
+  margin: -4px 0 14px; padding: 8px 10px; border-radius: 14px;
+  background: color-mix(in srgb, var(--danger) 18%, var(--bg, #0b1020)); border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+}
+.incall-text { flex: 1; font-weight: 650; font-size: .92rem; }
+.incall-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--danger); animation: incall-pulse 1.4s infinite; }
+@keyframes incall-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .incall-dot { animation: none; } }

@@ -54,6 +54,7 @@ function go(view) {
   for (const b of document.querySelectorAll('[data-nav]')) b.setAttribute('aria-current', b.dataset.nav === view ? 'page' : 'false');
   const root = $('#view');
   root.replaceChildren(VIEWS[view]());
+  if (S.call && view !== 'call') root.prepend(inCallStrip());
   root.focus({ preventScroll: true });
   if (view === 'map') mountMap();
 }
@@ -291,6 +292,20 @@ const lingerLabel = (l) => ({ end: 'ends with the call', '1h': 'open 1 hour', '2
 
 function refresh(view) { if (S.view === view) go(view); }
 
+function endCall() {
+  if (!S.call) return;
+  S.call.end(S.role === 'host'); // the host ends it for everyone; a guest just leaves
+}
+
+/** Shown at the top of Connect / Chat / Map / Settings while a call is open. */
+function inCallStrip() {
+  return h('div', { class: 'incall' },
+    h('span', { class: 'incall-dot' }),
+    h('span', { class: 'incall-text', text: `${modeLabel(S.call.payload.mode)} in progress` }),
+    h('button', { class: 'btn btn-sm', type: 'button', text: 'Open', onclick: () => go('call') }),
+    h('button', { class: 'btn btn-danger btn-sm', type: 'button', text: 'End', 'aria-label': 'End call', onclick: endCall }));
+}
+
 function seg(name, options, initial) {
   const wrap = h('div', { class: 'seg', role: 'radiogroup', 'aria-label': name });
   for (const [val, label] of options) {
@@ -306,6 +321,7 @@ const segVal = (root, name) => root.querySelector(`input[name="${name}"]:checked
 const VIEWS = {
   connect() {
     const form = h('section', { class: 'card hero' },
+      h('p', { class: 'tagline', text: 'WeKoNet — the Disposable Chat Software' }),
       h('h2', { text: 'Start a WeKoNet call' }),
       h('p', { class: 'muted', text: 'No phone number. No email. A one-time encrypted beacon is the only way in.' }),
       h('div', { class: 'field' }, h('span', { class: 'label', text: 'Type' }), seg('mode', [['voice', 'Voice'], ['video', 'Video'], ['chat', 'Chat']], 'video')),
@@ -371,11 +387,12 @@ const VIEWS = {
       h('button', { class: `ctl ${camOn ? '' : 'off'}`, type: 'button', 'aria-label': 'Camera', text: camOn ? 'Cam' : 'Cam off', onclick: (e) => { camOn = !camOn; S.call.toggleCam(camOn); e.currentTarget.textContent = camOn ? 'Cam' : 'Cam off'; e.currentTarget.classList.toggle('off', !camOn); } }),
       h('button', { class: 'ctl', type: 'button', text: 'Flip', 'aria-label': 'Switch camera', onclick: () => S.call.switchCamera() }),
       h('button', { class: 'ctl', type: 'button', text: 'Chat', onclick: () => go('chat') }),
-      h('button', { class: 'ctl end', type: 'button', text: 'End', 'aria-label': 'End call', onclick: () => S.call.end(S.role === 'host') }));
+      h('button', { class: 'ctl end', type: 'button', text: 'End', 'aria-label': 'End call', onclick: endCall }));
 
     const status = h('div', { class: 'callbar' },
       h('span', { class: 'lock', text: E2EE_MEDIA ? 'E2EE · X25519 + P-384 + ML-KEM-768' : 'DTLS-SRTP only on this device' }),
-      h('span', { text: S.deadline ? `Open until ${new Date(S.deadline).toLocaleTimeString()}` : lingerLabel(S.call.payload.linger) }));
+      h('span', { text: S.deadline ? `Open until ${new Date(S.deadline).toLocaleTimeString()}` : lingerLabel(S.call.payload.linger) }),
+      h('button', { class: 'btn btn-danger btn-sm', type: 'button', text: S.role === 'host' ? 'End for all' : 'Leave', 'aria-label': 'End call', onclick: endCall }));
 
     const save = [...S.peers.values()].filter((p) => !S.contacts.some((c) => c.wid === p.id)).map((p) =>
       h('button', { class: 'btn btn-sm', type: 'button', text: `Save connection: ${p.name}`, onclick: () => saveContact(p) }));

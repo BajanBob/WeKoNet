@@ -2,7 +2,7 @@
   "name": "wekonet",
   "productName": "WeKoNet",
   "version": "1.0.0",
-  "description": "WeKoNet Connect — beacon-initiated, end-to-end encrypted P2P voice, video, chat, location sharing and SOS for up to 3 people.",
+  "description": "WeKoNet — the Disposable Chat Software. Beacon-initiated, end-to-end encrypted P2P voice, video, chat, location sharing and SOS for up to 3 people.",
   "type": "module",
   "main": "electron/main.cjs",
   "license": "AGPL-3.0-or-later",
