@@ -12,7 +12,7 @@ import { createBeacon, openBeacon } from './crypto/beacon.js';
 import { b64u, unb64u } from './crypto/util.js';
 import { contactLinks, sealMail, openMail } from './crypto/contact.js';
 import { CallSession, E2EE_MEDIA } from './net/mesh.js';
-import { MailboxClient } from './net/signaling.js';
+import { MailboxClient, warmRelay } from './net/signaling.js';
 import { LocationSharer, SOSBeacon, playSiren, SHARE_DURATIONS } from './features/geo.js';
 import { onBeacon, shareToWhatsApp, shareNative, platform, keepAlive } from './platform.js';
 
@@ -38,6 +38,7 @@ async function boot() {
   await loadContacts();
   S.messages = (await vault.list('message')).slice(-200);
   await vault.scheduleNightlyPurge((r) => { if (r === 'wiped') location.reload(); else if (r > 0) toast(`${r} expired item(s) removed`); });
+  warmRelay(CONFIG.relayUrl);
   startMailbox();
   globalThis.wekonetDesktop?.onPurge(() => vault.purgeExpired());
 

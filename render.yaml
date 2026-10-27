@@ -13,5 +13,7 @@ services:
     healthCheckPath: /healthz
     autoDeploy: true
     envVars:
+      - key: TRUST_PROXY
+        value: "1"
       - key: ALLOWED_ORIGINS
         value: https://wekonet.app,capacitor://localhost,https://localhost,app://wekonet

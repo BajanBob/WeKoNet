@@ -228,7 +228,10 @@ export function startRelay({ port = PORT, host = HOST } = {}) {
   });
 
   server.on('upgrade', (req, sock) => {
-    const ip = req.socket.remoteAddress || '';
+    // Behind a hosting proxy (Render, Fly, …) every client arrives from the
+    // proxy's address; TRUST_PROXY=1 uses the client address it forwards.
+    const fwd = process.env.TRUST_PROXY === '1' ? String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() : '';
+    const ip = fwd || req.socket.remoteAddress || '';
     const origin = req.headers.origin || '';
     const key = req.headers['sec-websocket-key'];
     const reject = (code) => { sock.end(`HTTP/1.1 ${code} No\r\nConnection: close\r\n\r\n`); };
