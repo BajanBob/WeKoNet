@@ -1,0 +1,17 @@
+# One-click deploy of the WeKoNet relay on Render.com:
+#   https://render.com/deploy?repo=https://github.com/BajanBob/WeKoNet
+# After it is live, set the GitHub Actions variable
+#   VITE_RELAY_URL = wss://<your-service>.onrender.com/ws
+# and rebuild the apps.
+services:
+  - type: web
+    name: wekonet-relay
+    runtime: docker
+    plan: free            # free sleeps when idle; "starter" stays always on
+    dockerfilePath: ./deploy/Dockerfile.relay
+    dockerContext: .
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: ALLOWED_ORIGINS
+        value: https://wekonet.app,capacitor://localhost,https://localhost,app://wekonet
