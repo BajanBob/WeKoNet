@@ -1,0 +1,25 @@
+# One-box deployment: Caddy (TLS + static app) → relay, plus coturn for NAT traversal.
+services:
+  relay:
+    build: { context: .., dockerfile: deploy/Dockerfile.relay }
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      ALLOWED_ORIGINS: "https://wekonet.app,capacitor://localhost,https://localhost,app://wekonet"
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../dist:/srv/wekonet:ro
+      - caddy_data:/data
+  coturn:
+    image: coturn/coturn:latest
+    restart: unless-stopped
+    network_mode: host
+    volumes: ["./turnserver.conf:/etc/coturn/turnserver.conf:ro"]
+volumes:
+  caddy_data:

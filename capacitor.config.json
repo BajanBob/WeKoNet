@@ -1,0 +1,19 @@
+{
+  "appId": "app.wekonet.connect",
+  "appName": "WeKoNet",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https",
+    "iosScheme": "capacitor",
+    "allowNavigation": []
+  },
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": false
+  },
+  "ios": {
+    "contentInset": "always",
+    "webContentsDebuggingEnabled": false
+  }
+}

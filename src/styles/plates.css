@@ -1,0 +1,47 @@
+/* WeKoNet face plates — three complete visual identities, switchable live.
+   Each plate only defines tokens; every component reads them. */
+
+/* 1 · AURORA — deep night glass, teal + violet glow */
+html[data-plate="aurora"] {
+  --font: "Inter", "SF Pro Text", "Segoe UI Variable", "Segoe UI", Roboto, system-ui, sans-serif;
+  --mono: "JetBrains Mono", "SF Mono", ui-monospace, Consolas, monospace;
+  --bg: #070b18; --bg2: #0e1428;
+  --bg-art: radial-gradient(900px 500px at 10% -10%, #2dd4bf26, transparent 60%), radial-gradient(800px 600px at 110% 20%, #8b5cf62e, transparent 60%);
+  --surface: #ffffff0d; --surface-2: #ffffff14; --chrome: #070b18cc;
+  --line: #ffffff1f; --text: #e8edff; --muted: #9aa5c7;
+  --accent: #2dd4bf; --accent-ink: #042f2e; --accent-soft: #2dd4bf1f; --accent-line: #2dd4bf80;
+  --danger: #ff2d55; --ok: #34d399; --warn: #fbbf24;
+  --radius: 20px; --shadow: 0 12px 40px #0008; --glass: blur(14px) saturate(1.3);
+  color-scheme: dark;
+}
+
+/* 2 · GRAPHITE — matte instrument panel, amber signal, square-ish */
+html[data-plate="graphite"] {
+  --font: "IBM Plex Sans", "Segoe UI", Roboto, system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  --bg: #0f0f11; --bg2: #18181b;
+  --bg-art: repeating-linear-gradient(0deg, #ffffff05 0 1px, transparent 1px 28px), repeating-linear-gradient(90deg, #ffffff05 0 1px, transparent 1px 28px);
+  --surface: #18181b; --surface-2: #232327; --chrome: #0f0f11f2;
+  --line: #3f3f46; --text: #f4f4f5; --muted: #a1a1aa;
+  --accent: #f59e0b; --accent-ink: #1c1003; --accent-soft: #f59e0b1f; --accent-line: #f59e0b99;
+  --danger: #ef4444; --ok: #22c55e; --warn: #eab308;
+  --radius: 8px; --shadow: 0 1px 0 #ffffff0a inset, 0 8px 24px #0006; --glass: none;
+  color-scheme: dark;
+}
+html[data-plate="graphite"] .card { border-left: 3px solid var(--line); }
+html[data-plate="graphite"] .card.hero { border-left-color: var(--accent); }
+html[data-plate="graphite"] .brand, html[data-plate="graphite"] h2 { text-transform: uppercase; letter-spacing: .06em; }
+
+/* 3 · DAYLIGHT — warm, bright, soft & friendly (great outdoors / in sunlight) */
+html[data-plate="daylight"] {
+  --font: "Nunito", "SF Pro Rounded", "Segoe UI", Roboto, system-ui, sans-serif;
+  --mono: "SF Mono", ui-monospace, Consolas, monospace;
+  --bg: #fffaf3; --bg2: #ffffff;
+  --bg-art: radial-gradient(700px 400px at 100% 0%, #fed7aa88, transparent 60%), radial-gradient(600px 400px at 0% 100%, #fecdd366, transparent 60%);
+  --surface: #ffffff; --surface-2: #fff4e6; --chrome: #fffaf3e6;
+  --line: #f1dcc4; --text: #2b1d12; --muted: #7c6553;
+  --accent: #e8590c; --accent-ink: #ffffff; --accent-soft: #e8590c1a; --accent-line: #e8590c88;
+  --danger: #e11d48; --ok: #16a34a; --warn: #f59e0b;
+  --radius: 26px; --shadow: 0 10px 30px #c2410c1a; --glass: none;
+  color-scheme: light;
+}

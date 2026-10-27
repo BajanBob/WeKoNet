@@ -1,0 +1,30 @@
+# Replace the hostnames with your own domains.
+wekonet.app {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		Cross-Origin-Opener-Policy same-origin
+		Permissions-Policy "camera=(self), microphone=(self), geolocation=(self), payment=(), usb=()"
+		-Server
+	}
+	# Beacon links (https://wekonet.app/b/#v1...) open the same app.
+	@beacon path /b /b/*
+	uri @beacon strip_prefix /b
+	root * /srv/wekonet
+	try_files {path} /index.html
+	file_server
+	# no access logs: no IPs, no timing metadata
+	log {
+		output discard
+	}
+}
+
+relay.wekonet.app {
+	reverse_proxy /ws relay:8787
+	reverse_proxy /healthz relay:8787
+	log {
+		output discard
+	}
+}

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en" data-plate="aurora">
+<head>
+  <meta charset="utf-8">
+  <!--CSP-->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="referrer" content="no-referrer">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#0b1020">
+  <title>WeKoNet Connect</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <!-- The only script: a bundled module from our own origin. No inline JS anywhere. -->
+  <script type="module" src="./src/main.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="5"/><path d="M6 16a10 10 0 0 1 20 0M2 16a14 14 0 0 1 28 0" fill="none" stroke-width="2.4" stroke-linecap="round"/></svg>
+      <span>WeKoNet</span>
+    </div>
+    <div class="id-chip" title="Your WeKoNet ID"><span class="dot"></span><span id="my-id" class="mono">…</span></div>
+    <span id="platform" class="sr-only"></span>
+    <button id="sos-fab" class="sos-fab" type="button" aria-label="SOS help mode">SOS</button>
+  </header>
+
+  <main id="view" tabindex="-1"></main>
+
+  <nav class="tabbar" aria-label="Main">
+    <button type="button" data-nav="connect"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M5 12a7 7 0 0 1 14 0M2 12a10 10 0 0 1 20 0"/></svg><span>Connect</span></button>
+    <button type="button" data-nav="call"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="6" width="14" height="12" rx="3"/><path d="M16 10l6-3v10l-6-3z"/></svg><span>Call</span></button>
+    <button type="button" data-nav="chat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg><span>Chat</span></button>
+    <button type="button" data-nav="map"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s7-6.5 7-12a7 7 0 0 0-14 0c0 5.5 7 12 7 12z"/><circle cx="12" cy="10" r="2.5"/></svg><span>Map</span></button>
+    <button type="button" data-nav="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg><span>Settings</span></button>
+  </nav>
+
+  <div id="toasts" class="toasts" aria-live="assertive"></div>
+</body>
+</html>

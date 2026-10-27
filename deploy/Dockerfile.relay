@@ -1,0 +1,10 @@
+# WeKoNet blind relay — zero npm dependencies, runs as non-root, read-only FS.
+FROM node:22-alpine
+WORKDIR /app
+COPY server/relay.js ./relay.js
+RUN echo '{"type":"module"}' > package.json
+USER node
+ENV HOST=0.0.0.0 PORT=8787 NODE_ENV=production
+EXPOSE 8787
+HEALTHCHECK CMD wget -qO- http://127.0.0.1:8787/healthz || exit 1
+CMD ["node", "relay.js"]
