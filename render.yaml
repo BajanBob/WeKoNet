@@ -75,3 +75,24 @@ services:
   #     - path: /*
   #       name: Cross-Origin-Opener-Policy
   #       value: same-origin
+
+  # Bim Pulse — public potholes / traffic / "best of" scoreboard (apps/bimpulse).
+  # Needs a paid plan for the disk that keeps reports and photos.
+  - type: web
+    name: bimpulse
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./apps/bimpulse/Dockerfile
+    dockerContext: .
+    healthCheckPath: /healthz
+    autoDeploy: true
+    disk:
+      name: bimpulse-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: TRUST_PROXY
+        value: "1"
+      # Secret for removing abusive reports (POST /api/hide with header x-admin-token).
+      - key: ADMIN_TOKEN
+        generateValue: true

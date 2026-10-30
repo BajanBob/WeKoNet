@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Bim Pulse</title>
+  <meta name="description" content="Report potholes and traffic, and rate the best places and services in Barbados.">
+  <meta name="theme-color" content="#0f2a44">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/vendor/leaflet.css">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/vendor/leaflet.js" defer></script>
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><path d="M2 17h6l3-8 5 15 4-11 2 4h8" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <div>
+        <h1>Bim Pulse</h1>
+        <p class="tag">Barbados reports and rates · 1 = worst, 5 = best</p>
+      </div>
+    </div>
+    <button id="share-btn" class="btn btn-share" type="button">Share</button>
+  </header>
+
+  <main id="plate" class="plate" aria-label="Sections">
+    <p class="loading">Loading the latest scores…</p>
+  </main>
+
+  <p class="foot">Tap a section to add a report (100 characters max) or see what people said. Scores are the average of every live report.</p>
+
+  <dialog id="sheet" class="sheet" aria-labelledby="sheet-title">
+    <div class="sheet-head">
+      <h2 id="sheet-title">Section</h2>
+      <button id="sheet-close" class="btn btn-ghost" type="button" aria-label="Close">Close</button>
+    </div>
+    <div class="tabs" role="tablist">
+      <button id="tab-add" class="tab" role="tab" type="button" aria-selected="true">Add a report</button>
+      <button id="tab-see" class="tab" role="tab" type="button" aria-selected="false">See reports</button>
+    </div>
+    <section id="pane-add" class="pane" role="tabpanel" aria-labelledby="tab-add">
+      <form id="report-form" novalidate>
+        <label id="subject-wrap" class="field">
+          <span id="subject-label" class="label">Name of the place</span>
+          <input id="subject" name="subject" type="text" maxlength="60" autocomplete="off" placeholder="e.g. Oistins Fish Fry">
+        </label>
+        <label class="field">
+          <span class="label">Your report <span id="count" class="count">0 / 100</span></span>
+          <textarea id="text" name="text" maxlength="100" rows="2" placeholder="What did you see?"></textarea>
+        </label>
+        <fieldset class="field">
+          <legend class="label">Score <span id="score-hint" class="hint"></span></legend>
+          <div id="rating" class="rating" role="radiogroup" aria-label="Score from 1 to 5"></div>
+          <div class="scale"><span id="scale-low">1 Worst</span><span id="scale-high">5 Best</span></div>
+        </fieldset>
+        <div id="geo-block" class="geo" hidden>
+          <div class="row">
+            <label class="btn btn-camera" for="photo">Take photo</label>
+            <input id="photo" class="sr-only" type="file" accept="image/*" capture="environment">
+            <button id="locate" class="btn" type="button">Use my location</button>
+          </div>
+          <img id="preview" class="preview" alt="Photo to send" hidden>
+          <p id="loc-status" class="hint">No location yet. Tap “Use my location”, or tap the map to drop a pin.</p>
+          <div id="pick-map" class="map map-pick" aria-label="Tap to pin the location"></div>
+        </div>
+        <p id="form-msg" class="msg" role="status"></p>
+        <button id="submit" class="btn btn-primary btn-wide" type="submit">Send report</button>
+      </form>
+    </section>
+    <section id="pane-see" class="pane" role="tabpanel" aria-labelledby="tab-see" hidden>
+      <div id="see-map" class="map" hidden></div>
+      <ol id="leaders" class="leaders" hidden></ol>
+      <ul id="reports" class="reports"></ul>
+    </section>
+  </dialog>
+
+  <dialog id="share-sheet" class="sheet share">
+    <div class="sheet-head">
+      <h2>Share Bim Pulse</h2>
+      <button id="share-close" class="btn btn-ghost" type="button" aria-label="Close">Close</button>
+    </div>
+    <p>Scan with a phone camera to open the app. No sign-up needed.</p>
+    <div class="qr-wrap"><canvas id="qr" class="qr" role="img" aria-label="QR code for Bim Pulse"></canvas></div>
+    <code id="share-url" class="url"></code>
+    <div class="row wrap">
+      <a id="wa" class="btn btn-wa" target="_blank" rel="noopener noreferrer">Send on WhatsApp</a>
+      <button id="native-share" class="btn" type="button" hidden>Share…</button>
+      <button id="copy" class="btn" type="button">Copy link</button>
+    </div>
+    <p class="hint">On your phone’s browser menu, choose “Add to Home screen” to keep Bim Pulse like an app.</p>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+</body>
+</html>

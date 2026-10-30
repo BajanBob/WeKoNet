@@ -1,0 +1,11 @@
+{
+  "name": "Bim Pulse",
+  "short_name": "Bim Pulse",
+  "description": "Report potholes and traffic, and rate the best places and services in Barbados.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0f2a44",
+  "theme_color": "#0f2a44",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

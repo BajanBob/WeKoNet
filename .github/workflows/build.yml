@@ -49,6 +49,12 @@ jobs:
           set +e; WEKONET_SITE=dist-e2e npm run test:e2e 2>&1 | tee attack.log; st=${PIPESTATUS[0]}
           if [ $st -ne 0 ]; then echo "::error title=Browser attack tests failed::$(sed -n '/results ──/,$p' attack.log | grep -vE '^\s*$' | head -n 60 | tr -d '\r' | sed -e 's/%/%25/g' | sed -e ':a;N;$!ba;s/\n/%0A/g')"; fi
           exit $st
+      - name: Bim Pulse browser test (faceplate, rating, pothole photo + GPS, share)
+        shell: bash
+        run: |
+          set +e; node tests/e2e/bimpulse.e2e.mjs 2>&1 | tee bimpulse.log; st=${PIPESTATUS[0]}
+          if [ $st -ne 0 ]; then echo "::error title=Bim Pulse browser test failed::$(tail -n 20 bimpulse.log | tr -d '\r' | sed -e 's/%/%25/g' | sed -e ':a;N;$!ba;s/\n/%0A/g')"; fi
+          exit $st
       - uses: actions/upload-artifact@v4
         with: { name: wekonet-web, path: dist }
 
@@ -230,6 +236,15 @@ jobs:
           file: deploy/Dockerfile.relay
           push: true
           tags: ghcr.io/${{ env.OWNER }}/wekonet-relay:latest
+      - name: Bim Pulse image builds
+        uses: docker/build-push-action@v6
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: false
+          DOCKER_BUILD_SUMMARY: false
+        with:
+          context: .
+          file: apps/bimpulse/Dockerfile
+          push: false
 
   release:
     if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
