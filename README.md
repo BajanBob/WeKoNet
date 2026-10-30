@@ -53,21 +53,6 @@ All of this is covered by tests: `npm test` (crypto fuzzing, hostile-relay and l
 - **If a phone loses the relay** (network change, app in background), it reconnects and re-enters the room. A failed connection says why instead of hanging.
 - **Calls between phones on mobile data need TURN.** Set `CF_TURN_KEY_ID` and `CF_TURN_API_TOKEN` on the relay. `scripts/relay-check.mjs` (the *Relay check* workflow) reports whether TURN is being handed out.
 
-## Bim Pulse (apps/bimpulse)
-A separate free public app in the same repo. People report **potholes** and **traffic** (a photo and a GPS pin) and rate the **best dining, soul food, chill spot, car and home insurance companies, supermarket, government department, health clinic and car company**.
-- **The faceplate:** a tabular panel of 11 sections. Each key shows its average score (1 = worst, 5 = best), number of reports and current leader.
-- **Reports:** 100 characters max, plus a score from 1 to 5. "Best" sections need the place's name. Different spellings of one place are grouped, and leaderboards use a weighted average so one review can't top a list.
-- **Potholes:**
-  - *Take photo* opens the phone camera and pins the GPS location. People can also tap the map.
-  - The photo is shrunk on the phone and its EXIF data stripped before upload.
-  - Pothole reports leave the map after 3 people mark them fixed, or after 90 days. Traffic reports show for 3 hours.
-- **Sharing:** a QR code, WhatsApp, the phone's share menu and deep links (`/#potholes`). People can "Add to Home screen" to use it like an app.
-- **Safety:**
-  - Strict CSP, no inline code, and submitted text is shown only as plain text.
-  - Same-site posting only, with per-address limits (30 reports and 12 photos an hour).
-  - Remove an abusive report with `POST /api/hide` and the `x-admin-token` header. Render generates `ADMIN_TOKEN`.
-- **Deploy:** the `bimpulse` service in `render.yaml` (Starter plan with a 1 GB disk at `/data`).
-
 ## Links, calls on every network, app lock
 - **Short beacon links** (~47 characters, `https://wekonet.app/b/#s.…`): a sealed copy of the beacon is parked on your relay under an ID derived from the link's own key, so the relay holds only ciphertext. *Copy full link* (~340 characters, compact v2 format) still works if the relay restarts.
 - **TURN through Cloudflare**: set `CF_TURN_KEY_ID` and `CF_TURN_API_TOKEN` on the relay (Render asks for them). The relay hands short-lived TURN credentials to people in a room, so calls connect on mobile data and *Hide my IP* works; no TURN password is built into the app.
