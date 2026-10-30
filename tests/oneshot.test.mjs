@@ -96,3 +96,23 @@ test('relay: serves the browser app only from its allow-list, with strict header
   fs.writeFileSync(path.join(dir, 'csp.txt'), "script-src 'self' 'unsafe-inline'; require-trusted-types-for 'script'");
   assert.throws(() => webApp(dir), /not strict/);
 });
+
+test('caller whose relay connection drops while waiting reconnects and can still be reached', async () => {
+  const server = await startRelay({ port: 0, host: '127.0.0.1' });
+  const url = `ws://127.0.0.1:${server.address().port}/ws`;
+  try {
+    const host = await generateIdentity();
+    const b = await createBeacon({ identity: host, signalUrl: url, maxPeers: 2, mode: 'chat' });
+    const call = new CallSession({ identity: host, beacon: b, role: 'host', iceServers: [] });
+    let rooms = 0;
+    const back = new Promise((r) => call.addEventListener('room', () => { if (++rooms === 2) r(); }));
+    await call.start('chat');
+    await new Promise((r) => setTimeout(r, 200));
+    call.sig.ws.close(); // phone lost its connection to the relay
+    await back;          // …and came back into the same room by itself
+    const declined = new Promise((r) => call.addEventListener('declined', r));
+    assert.equal(await declineBeacon(await openBeacon(b.link)), true, 'guest must find the caller in the room');
+    await declined;
+    await call.end(true);
+  } finally { server.close(); }
+});

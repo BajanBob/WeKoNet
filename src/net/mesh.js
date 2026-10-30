@@ -42,9 +42,20 @@ export class CallSession extends EventTarget {
     await this.setMedia(mode);
     const sig = (this.sig = new Signaling(this.payload.sig, this.beacon.keys));
     sig.addEventListener('joined', (e) => this.#onJoined(e.detail));
-    sig.addEventListener('peer-left', (e) => this.#dropPeer(e.detail.peer, 'left'));
+    sig.addEventListener('peer-left', (e) => {
+      // The relay only lost *their* relay connection (phone switched network, app in
+      // background…). If our direct encrypted link is up, the call carries on.
+      const p = this.peers.get(e.detail.peer);
+      if (p?.pc?.connectionState === 'connected') return;
+      this.#dropPeer(e.detail.peer, 'left');
+    });
+    // Relay connection dropped (network change, phone asleep, app in background):
+    // reconnect and re-enter the same room instead of waiting forever.
+    sig.addEventListener('closed', () => this.#reconnect());
     sig.addEventListener('ended', () => this.end(false));
     sig.addEventListener('relay-error', (e) => {
+      // Rejoin after a relay restart failed, but we are still talking directly: ignore.
+      if (this.rejoined && [...this.peers.values()].some((x) => x.session)) return;
       this.emit('error', { message: relayError(e.detail.code, this.payload.max) });
       // Joining failed for good → tear the session down instead of hanging.
       if (FATAL.has(e.detail.code) && this.peers.size === 0) { this.failed = true; this.end(false); }
@@ -109,8 +120,23 @@ export class CallSession extends EventTarget {
     this.emit('local-stream', { stream: this.local });
   }
 
+  async #reconnect() {
+    if (this.ended || this.reconnecting) return;
+    this.reconnecting = true;
+    this.emit('warning', { message: 'Reconnecting to the WeKoNet relay…' });
+    try {
+      await this.sig.connect({ maxWaitMs: 120e3 });
+      if (this.ended) return;
+      this.rejoined = true;
+      this.sig.join(); // both sides re-enter with the beacon's join proof
+    } catch (e) {
+      if (this.peers.size === 0) { this.emit('error', { message: e.message }); this.failed = true; this.end(false); }
+    } finally { this.reconnecting = false; }
+  }
+
   // ---------- room / handshake ----------
   async #onJoined({ peer, peers, deadline, ice }) {
+    const again = this.rejoined && this.me;
     this.me = peer; this.deadline = deadline;
     // TURN servers + short-lived credentials handed out by the relay (Cloudflare).
     if (Array.isArray(ice) && ice.length) this.iceServers = [...ice];
@@ -118,6 +144,11 @@ export class CallSession extends EventTarget {
       this.emit('warning', { message: '“Hide my IP” needs a TURN server, which this relay does not provide yet — your IP address may be visible to the other person.' });
     }
     this.emit('room', { me: peer, deadline, linger: this.payload.linger });
+    clearTimeout(this.deadlineTimer);
+    // Back after a relay reconnect while already talking: the direct link is still up,
+    // so don't start a second handshake with the same people.
+    if (again && [...this.peers.values()].some((x) => x.session)) return;
+    if (again) this.peers.clear();
     if (deadline) this.deadlineTimer = setTimeout(() => this.end(false), Math.max(0, deadline - Date.now()));
     // Newcomer initiates a handshake with everyone already in the room.
     for (const other of peers) {
@@ -190,7 +221,14 @@ export class CallSession extends EventTarget {
     pc.onicecandidate = (e) => { if (e.candidate) this.#sendRtc(peerId, p, { ice: e.candidate.toJSON() }); };
     pc.onconnectionstatechange = () => {
       this.emit('peer-state', { peer: peerId, state: pc.connectionState });
-      if (pc.connectionState === 'failed') this.#dropPeer(peerId, 'connection failed');
+      if (pc.connectionState === 'failed') {
+        const turn = this.iceServers.some((x) => [].concat(x.urls).some((u) => /^turns?:/.test(u)));
+        this.emit('error', { message: turn
+          ? 'Could not connect the call — the network blocked it. Try Wi-Fi or mobile data and call again.'
+          : 'Could not connect the call directly between your networks. The WeKoNet relay has no TURN server set up, which mobile networks need.' });
+        this.#dropPeer(peerId, 'connection failed');
+        if (this.role === 'guest' && this.payload.max === 2 && this.peers.size === 0) { this.failed = true; this.end(false); }
+      }
     };
 
     // Data channel (pre-negotiated, same id on both sides → no in-band DCEP race)

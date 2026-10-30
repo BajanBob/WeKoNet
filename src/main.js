@@ -227,8 +227,8 @@ function showShare(b) {
     qr ? h('div', { class: 'qr-wrap' }, qr, h('span', { class: 'muted', text: 'Scan to answer' })) : null,
     h('code', { class: 'beacon-link', text: answer }),
     h('p', { class: 'muted', text: 'The invite also has Decline and Block links. The encryption key is after the “#”: it never reaches any server. Anyone with the link can answer until it expires, so send it only to the person you are calling.' })), [
-    ['WhatsApp', () => shareToWhatsApp(text), 'btn-wa'],
-    ['Share…', () => shareNative(text)],
+    ['WhatsApp', () => { shareToWhatsApp(text); b.sent = true; refresh('call'); }, 'btn-wa'],
+    ['Share…', async () => { if (await shareNative(text)) { b.sent = true; refresh('call'); } }],
     ['Copy invite', () => copyText(text, 'Invite copied')],
     ['Copy link', () => copyText(answer, 'Answer link copied')],
     ...(b.shortLink ? [['Copy full link', () => copyText(b.link, 'Full link copied — works even if the relay restarts')]] : []),
@@ -330,6 +330,7 @@ async function startCall(beacon, role, mode) {
   });
   call.addEventListener('remote-track', (e) => { const p = S.peers.get(e.detail.peer); if (p) { p.stream = e.detail.stream; refresh('call'); } });
   call.addEventListener('peer-left', (e) => { const p = S.peers.get(e.detail.peer); S.peers.delete(e.detail.peer); dropVideo(e.detail.peer); S.map?.remove(e.detail.peer); if (p) toast(`${p.name} left (${e.detail.reason})`); refresh('call'); });
+  call.addEventListener('peer-state', (e) => { const p = S.peers.get(e.detail.peer); if (p && p.state !== e.detail.state) { p.state = e.detail.state; refresh('call'); } });
   call.addEventListener('message', (e) => onPeerMessage(e.detail));
   call.addEventListener('room', (e) => { S.deadline = e.detail.deadline; refresh('call'); });
   call.addEventListener('security', (e) => toast(`Security: ${e.detail.message}`, 'danger'));
@@ -555,10 +556,11 @@ const VIEWS = {
       const v = videoFor(p.peerId, p.stream, false);
       tiles.append(h('figure', { class: `tile ${hasVideo(p.stream) ? '' : 'novideo'}`, dataset: { initials: initials(p.name) } }, v, h('figcaption', {},
         h('span', { text: p.name }),
+        p.state && p.state !== 'connected' ? h('span', { class: 'badge', text: p.state === 'failed' ? 'No connection' : 'Connecting…' }) : null,
         p.verified ? h('span', { class: 'badge ok', text: 'Verified' }) : h('span', { class: 'badge warn', text: 'Check words' }))));
     }
     const waiting = S.peers.size === 0 ? h('div', { class: 'waiting' },
-      h('div', { class: 'pulse' }), h('p', { text: S.role === 'host' ? 'Waiting for your contact to open the beacon…' : 'Connecting securely…' }),
+      h('div', { class: 'pulse' }), h('p', { text: S.role === 'host' ? (S.beacon?.sent ? 'Beacon sent ✓ — waiting for them to tap Answer…' : 'Waiting for your contact to open the beacon…') : 'Connecting securely…' }),
       S.role === 'host' && S.beacon ? h('button', { class: 'btn', type: 'button', text: 'Share beacon again', onclick: () => showShare(S.beacon) }) : null) : null;
 
     const verify = [...S.peers.values()].filter((p) => !p.verified).map((p) => h('section', { class: 'card sas' },
