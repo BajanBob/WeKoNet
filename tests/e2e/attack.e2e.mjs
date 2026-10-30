@@ -11,7 +11,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { startRelay } from '../../server/relay.js';
 import { Signaling } from '../../src/net/signaling.js';
-import { openBeacon, parseShort, shortId, openShort } from '../../src/crypto/beacon.js';
+import { openBeacon, parseShort, shortId, openShort, splitAction } from '../../src/crypto/beacon.js';
 import { generateIdentity } from '../../src/crypto/identity.js';
 import { respond } from '../../src/crypto/handshake.js';
 import { setKemProvider } from '../../src/crypto/kex.js';
@@ -142,13 +142,15 @@ async function hostBeacon(p, { mode = 'video', people = 2, linger = 'end' } = {}
   await p.click(`label[for=linger-${linger}]`);
   await p.click('text=Create beacon');
   await p.waitForSelector('.beacon-link');
-  const link = (await p.innerText('.beacon-link')).trim();
+  const shown = (await p.innerText('.beacon-link')).trim();
+  const { link, action } = splitAction(shown);
+  assert.equal(action, 'answer', 'the shared link should be the one-tap Answer link');
   await p.click('.modal >> text=Done');
-  return link;
+  return link; // plain link → ringing screen (Answer / Decline / Block)
 }
 async function openLink(p, link, { click = true } = {}) {
   await p.goto(link);
-  if (click) { await p.waitForSelector('text=Join encrypted call'); await p.click('text=Join encrypted call'); }
+  if (click) { await p.waitForSelector('.modal button.btn-answer'); await p.click('.modal button.btn-answer'); }
 }
 const remoteVideos = (p) => p.evaluate(() => [...document.querySelectorAll('.tile:not(.me) video')].map((v) => ({ w: v.videoWidth, t: v.currentTime })));
 async function waitVideos(p, n, ms = 25000) {
@@ -169,6 +171,72 @@ async function sendChat(p, text) {
 
 // ============================================================ scenarios
 await relayUp();
+
+await scenario('one tap: the Answer link and QR code open straight into the call; browser guests get a download button', async () => {
+  const A = await person('A'), B = await person('B');
+  await A.click('[data-nav=connect]');
+  await A.click('label[for=mode-video]');
+  await A.click('text=Create beacon');
+  await A.waitForSelector('.beacon-link');
+  const qr = await A.$eval('canvas.qr', (c) => ({ w: c.width, h: c.height }));
+  assert.ok(qr.w >= 200 && qr.w === qr.h, `QR code should be drawn, got ${JSON.stringify(qr)}`);
+  const answer = (await A.innerText('.beacon-link')).trim();
+  assert.match(answer, /#s\.[A-Za-z0-9_-]{22}\.answer$/);
+  await A.click('.modal >> text=Done');
+  await B.goto(answer); // no ringing screen, no extra tap
+  for (const p of [A, B]) await waitVideos(p, 1);
+  const dl = await B.$eval('.getapp a', (a) => ({ href: a.href, target: a.target, rel: a.rel }));
+  assert.equal(dl.target, '_blank', 'download must open in a new tab so the call keeps running');
+  assert.match(dl.rel, /noopener/);
+  assert.match(dl.href, /^https:\/\/github\.com\//);
+  assert.equal(await B.$('.modal'), null, 'answer link must not show the ringing screen');
+  await shot(B, 'e2e-oneTap-B');
+  await endAll(A, B);
+});
+
+await scenario('decline link: caller is told at once and the invite dies; nobody gets camera or mic', async () => {
+  const A = await person('A'), B = await person('B'), C = await person('C');
+  const link = await hostBeacon(A, { mode: 'voice' });
+  await B.ctx.addInitScript(() => { window.__gum = 0; const g = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices); navigator.mediaDevices.getUserMedia = (c) => { window.__gum++; return g(c); }; });
+  await B.goto(link + '.decline');
+  await B.waitForSelector('.modal >> text=Call declined');
+  await A.waitForSelector('.modal >> text=declined the call', { timeout: 15000 });
+  assert.match(await B.innerText('.modal'), /has been told/);
+  assert.equal(await B.evaluate(() => window.__gum ?? 0), 0, 'declining must not open the microphone');
+  // The declined invite is dead: answering it later fails cleanly.
+  await openLink(C, link + '.answer', { click: false });
+  await waitToast(C, /ended or is invalid|expired/);
+  await endAll(A, B, C);
+});
+
+await scenario('block link: caller blocked, later calls from them are auto-declined, unblock works', async () => {
+  const A = await person('A'), B = await person('B');
+  const link1 = await hostBeacon(A, { mode: 'chat' });
+  await B.goto(link1 + '.block');
+  await B.waitForSelector('.modal >> text=Caller blocked');
+  await A.waitForSelector('.modal >> text=declined the call', { timeout: 15000 });
+  await B.click('.modal >> text=OK');
+  await A.click('.modal >> text=OK');
+  await B.click('[data-nav=settings]');
+  const aid = (await A.innerText('#my-id')).trim();
+  await B.waitForSelector(`text=${aid}`);
+  // A calls again with a fresh invite; B taps plain Answer link → auto-declined, no ringing
+  await sleep(500);
+  const link2 = await hostBeacon(A, { mode: 'chat' });
+  await B.goto(link2 + '.answer');
+  await waitToast(B, /blocked this caller/);
+  await A.waitForSelector('.modal >> text=declined the call', { timeout: 15000 });
+  assert.equal(await B.$('.sas-words'), null, 'a blocked caller must never connect');
+  // Unblock, then a new call rings through again.
+  await A.click('.modal >> text=OK');
+  await B.click('[data-nav=settings]');
+  await B.click('.list >> text=Unblock');
+  await waitToast(B, /unblocked/);
+  const link3 = await hostBeacon(A, { mode: 'chat' });
+  await openLink(B, link3);
+  await A.waitForSelector('.sas-words', { timeout: 20000 });
+  await endAll(A, B);
+});
 
 await scenario('3-person call: everyone sees and hears the other two; 4th person is turned away', async () => {
   const A = await person('A'), B = await person('B'), C = await person('C'), D = await person('D');

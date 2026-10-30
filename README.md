@@ -38,6 +38,16 @@ People are identified by a **WeKoNet ID** (`WKN-XXXX-XXXX-XXXX-XXXX`) derived fr
 
 All of this is covered by tests: `npm test` (crypto fuzzing, hostile-relay and load tests) and `npm run test:e2e` (real-browser attacks) (handshake, tampering, impostor, forged MAC, beacon forgery/expiry, ratchet replay, frame tamper, relay admission/cap/expiry, mailbox purge).
 
+## One-tap calling (no app needed)
+- **Call someone:** tap *Create beacon*, then send the invite on WhatsApp or let them scan the **QR code**.
+- **The invite carries three links.** They share the same encryption key and differ only in a word after it:
+  - **✅ Answer** (`…#s.<key>.answer`) opens straight into the encrypted call, in the WeKoNet app or right in the browser. There is no install, sign-up or extra tap. The relay serves the web app at `/b/`.
+  - **❌ Decline** tells the caller "declined", sealed with the invite's own key. No camera, mic or identity is shared, and a declined 1-to-1 invite stops working at once.
+  - **🚫 Block** declines and blocks that caller's identity on this device. Their later calls are declined automatically. You can unblock them in *Settings → Blocked callers*.
+- A plain link without a word rings with **Answer / Decline / Block** buttons.
+- **During a browser call,** a *Download the app* button opens in a new tab, so the call keeps running. On Android it links straight to the APK.
+- **Encryption is unchanged.** The hybrid X25519 + P-384 + ML-KEM-768 handshake, the per-message ratchet, per-frame media encryption and the 6-word security check all apply exactly as before.
+
 ## Links, calls on every network, app lock
 - **Short beacon links** (~47 characters, `https://wekonet.app/b/#s.…`): a sealed copy of the beacon is parked on your relay under an ID derived from the link's own key, so the relay holds only ciphertext. *Copy full link* (~340 characters, compact v2 format) still works if the relay restarts.
 - **TURN through Cloudflare**: set `CF_TURN_KEY_ID` and `CF_TURN_API_TOKEN` on the relay (Render asks for them). The relay hands short-lived TURN credentials to people in a room, so calls connect on mobile data and *Hide my IP* works; no TURN password is built into the app.

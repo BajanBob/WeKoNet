@@ -6,6 +6,8 @@ const env = import.meta.env || {};
 export const CONFIG = {
   relayUrl: env.VITE_RELAY_URL || 'wss://wekonet-relay.onrender.com/ws',
   appBase: env.VITE_APP_BASE || 'https://wekonet-relay.onrender.com/b/',
+  // Where the in-call "Download the app" button points (GitHub release by default).
+  downloadUrl: env.VITE_DOWNLOAD_URL || 'https://github.com/BajanBob/WeKoNet/releases/latest',
   tileUrl: env.VITE_TILE_URL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
   // Public STUN works for most home / mobile networks. For strict NATs add a
   // TURN server via VITE_ICE_SERVERS (media stays end-to-end encrypted through it).

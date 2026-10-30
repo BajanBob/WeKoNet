@@ -77,6 +77,12 @@ export function h(tag, props = {}, ...children) {
     else if (k === 'text') el.textContent = v;
     else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
     else if (k === 'dataset') Object.assign(el.dataset, v);
+    else if (k === 'href') {
+      // Links: absolute https:// only (no javascript:, data:, relative tricks), always
+      // opened as a separate tab with no opener and no referrer.
+      if (tag !== 'a' || !/^https:\/\/[^\s"'<>]+$/i.test(String(v))) throw new Error('h(): only https links are allowed');
+      el.href = String(v); el.target = '_blank'; el.rel = 'noopener noreferrer';
+    } else if ((k === 'target' && v === '_blank') || (k === 'rel' && /^noopener( noreferrer)?$/.test(v))) { /* set together with href */ }
     else if (/^(aria-|role$|type$|id$|for$|name$|value$|placeholder$|title$|disabled$|checked$|autocomplete$|inputmode$|maxlength$|tabindex$|playsinline$|autoplay$|muted$)/.test(k)) {
       if (k === 'value' || k === 'checked' || k === 'muted') el[k] = v; else el.setAttribute(k, v === true ? '' : String(v));
     } else throw new Error(`h(): attribute "${k}" not allowed`);

@@ -4,6 +4,7 @@
 //   • Windows / Linux (Electron): wekonet:// protocol handler via preload bridge
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { App } from '@capacitor/app';
+import { CONFIG } from './config.js';
 
 export const platform = Capacitor.isNativePlatform()
   ? Capacitor.getPlatform()                 // 'android' | 'ios'
@@ -61,4 +62,19 @@ export async function keepAlive(on, text = 'WeKoNet is connected') {
     if (KeepAlive) await (on ? KeepAlive.start({ text: String(text).slice(0, 80) }) : KeepAlive.stop());
     globalThis.wekonetDesktop?.setKeepAlive?.(!!on);
   } catch { /* background mode unavailable — the call still works in the foreground */ }
+}
+
+// ---------- "Download the app" (shown during a browser call) ----------
+export function appDownload(ua = navigator.userAgent, touch = navigator.maxTouchPoints || 0) {
+  const base = CONFIG.downloadUrl;
+  const latest = /\/releases\/latest\/?$/.test(base) ? base.replace(/\/$/, '') : null;
+  if (/Android/i.test(ua)) {
+    return { url: latest ? `${latest}/download/WeKoNet.apk` : base, label: 'Download the Android app',
+      note: 'The call keeps going here while it downloads. Install the app for calls in the background and SOS alerts.' };
+  }
+  if (/iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && touch > 1)) {
+    return { url: null, label: '', note: 'The iPhone app is not in the App Store yet — this page gives you the same encrypted call.' };
+  }
+  return { url: base, label: /Windows/i.test(ua) ? 'Download for Windows' : 'Download the app',
+    note: 'Get the desktop app for Windows, Linux or Raspberry Pi. The call keeps going in this tab.' };
 }

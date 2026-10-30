@@ -230,3 +230,16 @@ html[data-locked] .id-chip, html[data-locked] dialog.modal { visibility: hidden;
 }
 .lock-card { width: min(360px, 100%); display: grid; gap: 12px; text-align: center; }
 .lock-card input { font-size: 1.6rem; letter-spacing: .4em; text-align: center; }
+
+/* ---------- one-tap calling ---------- */
+.qr-wrap { display: grid; justify-items: center; gap: 6px; margin: 10px 0; }
+.qr { width: min(64vw, 240px); height: auto; image-rendering: pixelated; border-radius: 10px; background: #fff; }
+.ring { text-align: center; }
+.ring-pulse { width: 64px; height: 64px; margin: 4px auto 10px; border-radius: 50%; background: var(--ok, #22c55e); animation: ring 1.4s ease-out infinite; }
+@keyframes ring { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok, #22c55e) 60%, transparent); } 100% { box-shadow: 0 0 0 26px transparent; } }
+.btn-answer { background: var(--ok, #22c55e); color: #052e16; border-color: transparent; font-weight: 700; }
+.getapp { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+.getapp p { margin: 4px 0 0; }
+.sound-btn { position: fixed; left: 50%; bottom: calc(90px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 60; box-shadow: var(--shadow); }
+@media (prefers-reduced-motion: reduce) { .ring-pulse { animation: none; } }
+.getapp a.btn { text-decoration: none; }

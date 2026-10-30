@@ -6,8 +6,8 @@
   var status = document.getElementById('status');
   var dl = document.documentElement.getAttribute('data-download') || '';
   if (dl) get.href = dl; else get.style.display = 'none';
-  var full = /^#v[12]\.[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{40,4000}$/;   // complete beacon
-  var short = /^#s\.[A-Za-z0-9_-]{22}$/;                              // short link (sealed copy on the relay)
+  var full = /^#v[12]\.[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{40,4000}(\.(answer|decline|block))?$/;   // complete beacon
+  var short = /^#s\.[A-Za-z0-9_-]{22}(\.(answer|decline|block))?$/;                              // short link (sealed copy on the relay)
   if (!full.test(hash) && !short.test(hash)) {
     status.textContent = 'This link is incomplete or damaged. Ask the sender for a new beacon.';
     status.className = 'err';

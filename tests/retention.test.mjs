@@ -52,6 +52,7 @@ test('retention: saved contacts never expire; SOS retention can be extended', as
   const { setSosRetention } = await import('../src/storage/retention.js');
   const now = Date.UTC(2026, 9, 27), HOUR = 3600e3;
   assert.equal(isExpired({ type: 'contact', createdAt: now - 400 * DAY }, now), false);
+  assert.equal(isExpired({ type: 'blocked', createdAt: now - 400 * DAY }, now), false);
   setSosRetention('7d');
   assert.equal(isExpired({ type: 'sos', createdAt: now - 6 * DAY }, now), false);
   assert.equal(isExpired({ type: 'sos', createdAt: now - 8 * DAY }, now), true);

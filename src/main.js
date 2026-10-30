@@ -10,19 +10,20 @@ import { h, setRich } from './ui/sanitize.js';
 import * as vault from './storage/vault.js';
 import { setSosRetention } from './storage/retention.js';
 import { makePinRecord, checkPin, validPin, MAX_FAILS, LOCK_AFTER } from './storage/lock.js';
-import { createBeacon, openBeacon, sealShort, parseShort, shortId, openShort } from './crypto/beacon.js';
+import { createBeacon, openBeacon, sealShort, parseShort, shortId, openShort, splitAction, actionLink } from './crypto/beacon.js';
 import { b64u, unb64u } from './crypto/util.js';
 import { contactLinks, sealMail, openMail } from './crypto/contact.js';
-import { CallSession, E2EE_MEDIA } from './net/mesh.js';
+import { CallSession, E2EE_MEDIA, declineBeacon } from './net/mesh.js';
 import { MailboxClient, warmRelay, relayRequest } from './net/signaling.js';
 import { LocationSharer, SOSBeacon, playSiren, SHARE_DURATIONS } from './features/geo.js';
-import { onBeacon, shareToWhatsApp, shareNative, platform, keepAlive } from './platform.js';
+import { onBeacon, shareToWhatsApp, shareNative, platform, keepAlive, appDownload } from './platform.js';
+import { drawQR } from './ui/qr.js';
 
 const $ = (sel) => document.querySelector(sel);
 
 const S = {
   identity: null, call: null, beacon: null, role: null,
-  peers: new Map(), messages: [], contacts: [], map: null,
+  peers: new Map(), messages: [], contacts: [], blocked: [], map: null,
   sharer: new LocationSharer(), sos: new SOSBeacon(), mail: null,
   plate: 'aurora', hideIp: false, autoJoinContacts: true, view: 'connect',
 };
@@ -47,6 +48,7 @@ async function boot() {
   $('#platform').textContent = platform;
 
   await loadContacts();
+  await loadBlocked();
   S.messages = (await vault.list('message')).slice(-200);
   await vault.scheduleNightlyPurge((r) => { if (r === 'wiped') location.reload(); else if (r > 0) toast(`${r} expired item(s) removed`); });
   warmRelay(CONFIG.relayUrl);
@@ -194,23 +196,49 @@ async function makeShortLink(b) {
   } catch { return null; }
 }
 
+/** The invite message: one-tap Answer / Decline / Block links (all carry the same key). */
+function inviteText(b) {
+  const link = b.shortLink || b.link;
+  const mins = Math.max(1, Math.round((b.payload.exp - Date.now()) / 60e3));
+  return [
+    `📞 ${S.identity.id} is calling you on WeKoNet — ${modeLabel(b.payload.mode).toLowerCase()}, end-to-end encrypted.`,
+    '',
+    `✅ Answer: ${actionLink(link, 'answer')}`,
+    `❌ Decline: ${actionLink(link, 'decline')}`,
+    `🚫 Block: ${actionLink(link, 'block')}`,
+    '',
+    `Tap Answer — it opens right in your browser, no app or sign-up needed. Expires in ${mins} min.`,
+  ].join('\n');
+}
+
+function copyText(text, done) {
+  if (!navigator.clipboard) return toast('Copying is not available here — long-press the link instead', 'warn');
+  navigator.clipboard.writeText(text).then(() => toast(done), () => toast('Could not copy — long-press the link instead', 'warn'));
+}
+
 function showShare(b) {
   const link = b.shortLink || b.link;
-  const text = `Join my private WeKoNet ${b.payload.mode} call (end-to-end encrypted, expires in ${Math.round((b.payload.exp - Date.now()) / 60e3)} min): ${link}`;
-  modal('Send your beacon', h('div', {},
-    h('p', { text: 'Anyone with this link can join until it expires or the call ends. Send it only to the people you want in the call.' }),
-    h('code', { class: 'beacon-link', text: link }),
-    h('p', { class: 'muted', text: 'The encryption key is after the “#”: it never reaches any server.' })), [
+  const answer = actionLink(link, 'answer');
+  const text = inviteText(b);
+  let qr = null;
+  try { qr = drawQR(h('canvas', { class: 'qr', role: 'img', 'aria-label': 'QR code: scan to answer the call' }), answer); } catch { /* too long for a QR code */ }
+  modal('Call someone', h('div', {},
+    h('p', { text: 'Send the invite on WhatsApp, or let them scan the code. One tap answers the call — in the WeKoNet app or straight in their browser.' }),
+    qr ? h('div', { class: 'qr-wrap' }, qr, h('span', { class: 'muted', text: 'Scan to answer' })) : null,
+    h('code', { class: 'beacon-link', text: answer }),
+    h('p', { class: 'muted', text: 'The invite also has Decline and Block links. The encryption key is after the “#”: it never reaches any server. Anyone with the link can answer until it expires, so send it only to the person you are calling.' })), [
     ['WhatsApp', () => shareToWhatsApp(text), 'btn-wa'],
     ['Share…', () => shareNative(text)],
-    ['Copy link', () => navigator.clipboard?.writeText(link).then(() => toast('Copied'))],
-    ...(b.shortLink ? [['Copy full link', () => navigator.clipboard?.writeText(b.link).then(() => toast('Full link copied — works even if the relay restarts'))]] : []),
+    ['Copy invite', () => copyText(text, 'Invite copied')],
+    ['Copy link', () => copyText(answer, 'Answer link copied')],
+    ...(b.shortLink ? [['Copy full link', () => copyText(b.link, 'Full link copied — works even if the relay restarts')]] : []),
     ['Done', null, 'btn-ghost'],
   ]);
 }
 
-async function receiveBeacon(frag) {
-  let o;
+async function receiveBeacon(input) {
+  const { link: frag0, action } = splitAction(input);
+  let frag = frag0, o;
   try {
     const k = parseShort(frag);
     if (k) {
@@ -224,21 +252,57 @@ async function receiveBeacon(frag) {
     }
     o = await openBeacon(frag, Date.now(), { defaultRelay: CONFIG.relayUrl });
   } catch (e) { return toast(e.message, 'danger'); }
-  if (S.call) return toast('Finish the current call before joining another', 'warn');
+  if (o.payload.from === b64u(S.identity.pub)) return toast('This is your own invite — send it to the person you want to call', 'warn');
   const contact = S.contacts.find((c) => c.pub === o.payload.from);
-  const firstRun = !(await vault.settings.get('kept', false)) && S.contacts.length === 0;
-  if (firstRun) await vault.settings.set('guest', true);
   const who = contact ? `${contact.name} (${o.payload.fromId})` : o.payload.fromId;
-  const join = () => startCall(o, 'guest', o.payload.mode).then(() => go('call')).catch((e) => toast(e.message, 'danger'));
-  if (contact && S.autoJoinContacts) { toast(`Joining ${contact.name}’s beacon…`); return join(); }
-  modal('Incoming WeKoNet beacon', h('div', {},
+
+  if (S.blocked.some((x) => x.pub === o.payload.from)) {
+    declineBeacon(o).catch(() => {});
+    return toast(`Declined a call from ${o.payload.fromId} — you blocked this caller`, 'warn');
+  }
+  if (action === 'decline') return declineCall(o, who);
+  if (action === 'block') return blockCaller(o, who);
+  if (S.call) return toast('Finish the current call before answering another', 'warn');
+
+  const join = async () => {
+    const firstRun = !(await vault.settings.get('kept', false)) && S.contacts.length === 0;
+    if (firstRun) await vault.settings.set('guest', true);
+    return startCall(o, 'guest', o.payload.mode).then(() => go('call')).catch((e) => toast(e.message, 'danger'));
+  };
+  if (action === 'answer') { toast(`Answering ${who}…`); return join(); }
+  if (contact && S.autoJoinContacts) { toast(`Joining ${contact.name}’s call…`); return join(); }
+  ringing(o, who, contact, join);
+}
+
+/** Incoming call screen for a plain link: Answer · Decline · Block. */
+function ringing(o, who, contact, join) {
+  modal(`${modeLabel(o.payload.mode)} from ${contact ? contact.name : o.payload.fromId}`, h('div', { class: 'ring' },
+    h('div', { class: 'ring-pulse', 'aria-hidden': 'true' }),
     h('p', {}, 'From ', h('strong', { text: who })),
-    h('p', { text: `${modeLabel(o.payload.mode)} · up to ${o.payload.max} people · ${lingerLabel(o.payload.linger)}` }),
+    h('p', { text: `End-to-end encrypted · up to ${o.payload.max} people · ${lingerLabel(o.payload.linger)}` }),
     h('p', { class: 'muted', text: contact ? 'Saved contact ✓' : 'Not a saved contact — compare the security words once connected.' })), [
-    ['Join encrypted call', join, 'btn-primary'],
-    ['Decline', null, 'btn-ghost'],
+    ['Answer', join, 'btn-primary btn-answer'],
+    ['Decline', () => declineCall(o, who), 'btn-ghost'],
+    ['Block', () => blockCaller(o, who), 'btn-danger'],
   ]);
 }
+
+async function declineCall(o, who) {
+  toast('Declining…');
+  const told = await declineBeacon(o).catch(() => false);
+  modal('Call declined', h('p', { text: told ? `${who} has been told you can’t take the call.` : `The call from ${who} has already ended.` }), [['OK', null, 'btn-primary']]);
+}
+
+async function blockCaller(o, who) {
+  if (!S.blocked.some((x) => x.pub === o.payload.from)) await vault.save('blocked', { pub: o.payload.from, wid: o.payload.fromId });
+  const c = S.contacts.find((x) => x.pub === o.payload.from);
+  if (c) { await vault.remove(c.id); await loadContacts(); }
+  await loadBlocked();
+  await declineBeacon(o).catch(() => false);
+  modal('Caller blocked', h('p', { text: `${who} is blocked on this device. Their calls will be declined automatically. You can unblock them in Settings.` }), [['OK', () => refresh('settings'), 'btn-primary']]);
+}
+
+async function loadBlocked() { S.blocked = await vault.list('blocked'); }
 
 async function onContactBeacon(c, body) {
   if (body?.link) receiveBeacon(body.link);
@@ -271,6 +335,12 @@ async function startCall(beacon, role, mode) {
   call.addEventListener('security', (e) => toast(`Security: ${e.detail.message}`, 'danger'));
   call.addEventListener('warning', (e) => toast(e.detail.message, 'warn'));
   call.addEventListener('error', (e) => toast(e.detail.message, 'danger'));
+  call.addEventListener('declined', () => {
+    if (S.peers.size === 0 && call.payload.max === 2) {
+      call.end(true); // a declined 1-to-1 invite dies at once
+      modal('Call declined', h('p', { text: 'The person you invited declined the call. The invite link no longer works.' }), [['OK', null, 'btn-primary']]);
+    } else toast('Someone declined the call', 'warn');
+  });
   call.addEventListener('ended', () => onCallEnded());
   await call.start(mode);
   keepAlive(true, `WeKoNet ${modeLabel(mode).toLowerCase()} · ${lingerLabel(beacon.payload.linger)}`);
@@ -392,6 +462,16 @@ function inCallStrip() {
     h('button', { class: 'btn btn-danger btn-sm', type: 'button', text: 'End', 'aria-label': 'End call', onclick: endCall }));
 }
 
+/** Browser only: "Download the app" — opens in a new tab so the call keeps running. */
+function getAppCard() {
+  if (platform !== 'web') return null;
+  const d = appDownload();
+  return h('section', { class: 'card getapp' },
+    h('div', {}, h('strong', { text: 'You’re using WeKoNet in your browser' }),
+      h('p', { class: 'muted', text: d.note })),
+    d.url ? h('a', { class: 'btn btn-primary', href: d.url, target: '_blank', rel: 'noopener noreferrer', text: d.label }) : null);
+}
+
 function seg(name, options, initial) {
   const wrap = h('div', { class: 'seg', role: 'radiogroup', 'aria-label': name });
   for (const [val, label] of options) {
@@ -410,8 +490,20 @@ const videoCache = new Map();
 function videoFor(key, stream, muted) {
   let v = videoCache.get(key);
   if (!v) { v = h('video', { class: 'tile-video', autoplay: true, playsinline: true, muted }); videoCache.set(key, v); }
-  if (stream && v.srcObject !== stream) v.srcObject = stream;
+  if (stream && v.srcObject !== stream) {
+    v.srcObject = stream;
+    // Browsers opened from a link may block sound until the first tap.
+    if (!muted) v.play?.().catch(() => askForSound());
+  }
   return v;
+}
+function askForSound() {
+  if (document.querySelector('.sound-btn')) return;
+  const b = h('button', { class: 'btn btn-primary sound-btn', type: 'button', text: '🔊 Tap to hear the call', onclick: () => {
+    for (const v of videoCache.values()) v.play?.().catch(() => {});
+    b.remove();
+  } });
+  document.body.append(b);
 }
 function dropVideo(key) { const v = videoCache.get(key); if (v) { v.srcObject = null; videoCache.delete(key); } }
 
@@ -494,7 +586,7 @@ const VIEWS = {
     const save = [...S.peers.values()].filter((p) => !S.contacts.some((c) => c.wid === p.id)).map((p) =>
       h('button', { class: 'btn btn-sm', type: 'button', text: `Save connection: ${p.name}`, onclick: () => saveContact(p) }));
 
-    return h('div', { class: 'stack call' }, status, tiles, waiting, ctl, save.length ? h('div', { class: 'row wrap save-row' }, save) : null, ...verify);
+    return h('div', { class: 'stack call' }, status, tiles, waiting, ctl, getAppCard(), save.length ? h('div', { class: 'row wrap save-row' }, save) : null, ...verify);
   },
 
   chat() {
@@ -567,6 +659,11 @@ const VIEWS = {
       h('section', { class: 'card' }, h('h2', { text: 'Privacy' }),
         toggle('Hide my IP address', 'hideIp', S.hideIp, 'Route calls through the TURN relay so peers never see your IP (slightly higher latency).'),
         toggle('Auto-join saved connections', 'autoJoinContacts', S.autoJoinContacts, 'Beacons from saved, known contacts open straight into the call.')),
+      h('section', { class: 'card' }, h('h2', { text: 'Blocked callers' }),
+        S.blocked.length ? h('ul', { class: 'list' }, S.blocked.map((b) => h('li', { class: 'contact' },
+          h('span', { class: 'mono', text: b.wid }),
+          h('button', { class: 'btn btn-sm', type: 'button', text: 'Unblock', onclick: async () => { await vault.remove(b.id); await loadBlocked(); toast(`${b.wid} unblocked`); refresh('settings'); } }))))
+          : h('p', { class: 'muted', text: 'Nobody is blocked. Tap “Block” on an incoming call (or the Block link in an invite) to stop someone calling you.' })),
       h('section', { class: 'card' }, h('h2', { text: 'App lock' }),
         h('p', { class: 'muted', text: S.pin ? 'WeKoNet asks for your PIN when it opens and after it has been in the background.' : 'Protect WeKoNet with a PIN in case someone picks up your unlocked phone or computer.' }),
         S.pin ? h('div', { class: 'field' }, h('span', { class: 'label', text: 'Lock after leaving the app' }), (() => {

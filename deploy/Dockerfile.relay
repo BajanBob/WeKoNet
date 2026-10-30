@@ -1,8 +1,28 @@
-# WeKoNet blind relay — zero npm dependencies, runs as non-root, read-only FS.
+# WeKoNet relay + browser calling page — the relay itself has zero npm dependencies,
+# runs as non-root, read-only FS.
+#
+# Stage 1 builds the WeKoNet web app so beacon links (https://<relay>/b/#…) open
+# straight into the encrypted call in any browser, no install needed.
+FROM node:22-alpine AS web
+WORKDIR /src
+ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1 PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 CI=1
+COPY package.json ./
+# Only what the browser build needs (no Electron / Capacitor tooling).
+RUN node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json'));p.dependencies.vite=p.devDependencies.vite;delete p.devDependencies;delete p.build;fs.writeFileSync('package.json',JSON.stringify(p))" \
+ && npm install --no-audit --no-fund --ignore-scripts
+COPY index.html vite.config.js ./
+COPY public ./public
+COPY src ./src
+ARG VITE_RELAY_URL=wss://wekonet-relay.onrender.com/ws
+ARG VITE_APP_BASE=https://wekonet-relay.onrender.com/b/
+ARG VITE_DOWNLOAD_URL=https://github.com/BajanBob/WeKoNet/releases/latest
+RUN npx vite build
+
 FROM node:22-alpine
 WORKDIR /app
 COPY server/relay.js ./relay.js
 COPY server/landing ./landing
+COPY --from=web /src/dist ./web
 RUN echo '{"type":"module"}' > package.json
 USER node
 ENV HOST=0.0.0.0 PORT=8787 NODE_ENV=production

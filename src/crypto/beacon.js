@@ -185,3 +185,18 @@ export async function openShort(k, data) {
   const pt = await open(key, unb64u(data), AADS).catch(() => { throw new Error('Short link is corrupted or was tampered with'); });
   return td.decode(pt);
 }
+
+// ---------- one-tap actions ----------
+// The invite carries three links that differ only in a word after the key:
+//   …#s.<key>.answer   open straight into the call
+//   …#s.<key>.decline  tell the caller "declined" (sealed with the beacon key)
+//   …#s.<key>.block    decline and never ring for this caller's identity again
+// The word is part of the fragment too, so it never reaches a server either.
+// Beacon fragments themselves never contain a fourth "." part, so this is unambiguous.
+export const ACTIONS = ['answer', 'decline', 'block'];
+export function splitAction(linkOrFragment) {
+  const s = String(linkOrFragment ?? '').trim();
+  const m = /^(.*#?(?:v1|v2|s)\.[A-Za-z0-9_.-]+?)\.(answer|decline|block)$/.exec(s);
+  return m ? { link: m[1], action: m[2] } : { link: s, action: null };
+}
+export const actionLink = (link, action) => `${link}.${action}`;

@@ -131,6 +131,12 @@ export class CallSession extends EventTarget {
 
   async #onSignal({ from, msg }) {
     let p = this.peers.get(from);
+    // "Declined" from someone who opened the decline / block link. It is sealed with
+    // the beacon's signaling key, so only a holder of the invite can send it.
+    if (msg.t === 'decline') {
+      if (!p && this.role === 'host') this.emit('declined', { from });
+      return;
+    }
     if (msg.t === 'hello') {
       if (p) throw new Error('duplicate hello');
       if (this.peers.size >= this.payload.max - 1) throw new Error('room full');
@@ -308,6 +314,32 @@ export class CallSession extends EventTarget {
     this.beacon.beaconKey?.fill(0); // token beacon expires locally too
     this.emit('ended', {});
   }
+}
+
+/**
+ * Decline an invite without joining the call: enter the room just long enough to
+ * send a sealed "decline" to whoever is waiting in it, then leave. No camera or
+ * microphone is opened and no identity is exchanged.
+ * Resolves true if the caller was told, false if nobody was waiting.
+ */
+export async function declineBeacon(beacon, { timeoutMs = 20e3 } = {}) {
+  const sig = new Signaling(beacon.payload.sig, beacon.keys);
+  await sig.connect({ maxWaitMs: timeoutMs });
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (ok) => {
+      if (done) return; done = true;
+      clearTimeout(t); sig.leave(); setTimeout(() => sig.close(), 300); resolve(ok);
+    };
+    const t = setTimeout(() => finish(false), timeoutMs);
+    sig.addEventListener('joined', async (e) => {
+      const peers = e.detail.peers || [];
+      for (const other of peers) await sig.send(other, { t: 'decline' }).catch(() => {});
+      finish(peers.length > 0);
+    });
+    sig.addEventListener('relay-error', () => finish(false));
+    sig.join();
+  });
 }
 
 function preferCodec(tr, kind) {

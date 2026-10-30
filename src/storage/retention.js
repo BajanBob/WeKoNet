@@ -3,7 +3,7 @@
 //   • Message / call / SOS history: kept at most 3 hours, then deleted.
 //   • Live-location breadcrumbs: also at most 3 hours.
 //   • SOS: 3 hours by default, or 7 / 30 days if chosen in Settings.
-//   • Saved connections (contacts) never expire on their own.
+//   • Saved connections (contacts) and blocked callers never expire on their own.
 //   • Expired items are hidden immediately and deleted every few minutes.
 //   • Every night at 01:00 local time WeKoNet purges itself:
 //       – everything past its retention date
@@ -27,6 +27,7 @@ export function isExpired(rec, now = Date.now()) {
     case 'location': return now - rec.createdAt > LOCATION_MS;
     case 'temp': return true;
     case 'contact': return false;                     // saved connections stay until you remove them
+    case 'blocked': return false;                     // blocked callers stay blocked until you unblock
     case 'sos': return now - rec.createdAt > sosMs;
     default: return now - rec.createdAt > HISTORY_MS; // message, call, sos
   }

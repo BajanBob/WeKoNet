@@ -350,6 +350,32 @@ function landingPages() {
   return out;
 }
 
+// Browser calling: the built WeKoNet web app (dist/ → ./web in the Docker image)
+// is served at /b/, so a beacon link opens straight into the call in any browser,
+// with no install. Every file is read once at start-up into an allow-list —
+// nothing outside it can ever be served (no path handling at request time).
+const WEB_TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml',
+  '.png': 'image/png', '.webmanifest': 'application/manifest+json', '.json': 'application/json', '.woff2': 'font/woff2', '.wasm': 'application/wasm' };
+export function webApp(dir = process.env.WEB_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), 'web')) {
+  let csp;
+  try { csp = fs.readFileSync(path.join(dir, 'csp.txt'), 'utf8').trim(); } catch { return null; }
+  if (!/require-trusted-types-for/.test(csp) || /unsafe-(inline|eval)/.test(csp)) throw new Error('web app CSP is not strict — refusing to serve it');
+  const files = {};
+  const walk = (rel) => {
+    for (const e of fs.readdirSync(path.join(dir, rel), { withFileTypes: true })) {
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) { walk(r); continue; }
+      const type = WEB_TYPES[path.extname(e.name)];
+      if (!type || r === 'index.html') continue;          // '/' stays the relay status page
+      const url = r === 'b/index.html' ? '/b/' : `/${r}`;
+      files[url] = { type, body: fs.readFileSync(path.join(dir, r)), immutable: r.startsWith('assets/') };
+    }
+  };
+  walk('');
+  if (!files['/b/']) return null;
+  return { files, csp: `${csp}; frame-ancestors 'none'` };
+}
+
 // ---------------- server ----------------
 export function startRelay({
   port = PORT, host = HOST,
@@ -369,6 +395,8 @@ export function startRelay({
   const core = createCore();
   const { Conn, ipCount } = core;
   const pages = landingPages();
+  const web = webApp();
+  if (web) Object.assign(pages, web.files); // the real app replaces the "open in app" landing page
   const server = http.createServer((req, res) => {
     const url = (req.url || '/').split('?')[0];
     const base = {
@@ -379,7 +407,13 @@ export function startRelay({
     if (url === '/healthz') { res.writeHead(200, { ...base, 'content-type': 'text/plain' }); return res.end('ok'); }
     const page = pages[url === '/b' ? '/b/' : url];
     if (page && (req.method === 'GET' || req.method === 'HEAD')) {
-      res.writeHead(200, { ...base, 'content-type': page.type });
+      const app = web && web.files[url === '/b' ? '/b/' : url] === page;
+      res.writeHead(200, { ...base, 'content-type': page.type, ...(app ? {
+        'content-security-policy': web.csp,
+        'permissions-policy': 'camera=(self), microphone=(self), geolocation=(self), payment=(), usb=()',
+        'cross-origin-opener-policy': 'same-origin',
+        ...(page.immutable ? { 'cache-control': 'public, max-age=31536000, immutable' } : {}),
+      } : {}) });
       return res.end(req.method === 'HEAD' ? undefined : page.body);
     }
     res.writeHead(404, { ...base, 'content-type': 'text/plain' }); res.end('');
