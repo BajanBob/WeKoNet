@@ -116,3 +116,36 @@ test('caller whose relay connection drops while waiting reconnects and can still
     await call.end(true);
   } finally { server.close(); }
 });
+
+test('caller card: photo is signed by the caller, bound to the call, sealed from the relay', async () => {
+  const { sealShort, sealCard, openCard, cardId } = await import('../src/crypto/beacon.js');
+  const caller = await generateIdentity(), other = await generateIdentity();
+  const b = await createBeacon({ identity: caller, signalUrl: 'wss://relay.example/ws', maxPeers: 2 });
+  const s = await sealShort(b.fragment);
+  const photo = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, ...new Uint8Array(500).fill(7)]);
+  const card = await sealCard(s.k, { identity: caller, room: b.payload.room, photo });
+  assert.equal(card.id, await cardId(s.k));
+  assert.ok(!card.data.includes('_9j_'), 'relay must only ever see ciphertext');
+  const ok = await openCard(s.k, card.data, { room: b.payload.room, inviterPub: (await openBeacon(b.link)).inviterPub });
+  assert.deepEqual(ok, photo);
+  // Someone else's photo, or the caller's photo from another call, is refused.
+  const forged = await sealCard(s.k, { identity: other, room: b.payload.room, photo });
+  await assert.rejects(openCard(s.k, forged.data, { room: b.payload.room, inviterPub: (await openBeacon(b.link)).inviterPub }), /signature/);
+  const replay = await sealCard(s.k, { identity: caller, room: 'another-room', photo });
+  await assert.rejects(openCard(s.k, replay.data, { room: b.payload.room, inviterPub: (await openBeacon(b.link)).inviterPub }), /signature/);
+  await assert.rejects(sealCard(s.k, { identity: caller, room: b.payload.room, photo: new Uint8Array(9000) }), /too large/);
+});
+
+test('relay: caller cards are stored separately with their own size cap', async () => {
+  const server = await startRelay({ port: 0, host: '127.0.0.1' });
+  const url = `ws://127.0.0.1:${server.address().port}/ws`;
+  const ask = (msg) => new Promise((ok) => { const ws = new WebSocket(url); ws.onopen = () => ws.send(JSON.stringify(msg)); ws.onmessage = (e) => { ws.close(); ok(JSON.parse(e.data)); }; });
+  try {
+    const id = 'AAAAAAAAAAAAAAAA', exp = Date.now() + 60e3;
+    assert.equal((await ask({ op: 'stash', kind: 'card', id, data: 'x'.repeat(11000), exp })).op, 'stashed');
+    assert.equal((await ask({ op: 'fetch', id })).code, 'no-such-link', 'cards never answer as short links');
+    assert.equal((await ask({ op: 'fetch', kind: 'card', id })).data.length, 11000);
+    assert.equal((await ask({ op: 'stash', kind: 'card', id: 'BBBBBBBBBBBBBBBB', data: 'x'.repeat(13000), exp })).code, 'bad-request');
+    assert.equal((await ask({ op: 'stash', id: 'CCCCCCCCCCCCCCCC', data: 'x'.repeat(4000), exp })).code, 'bad-request');
+  } finally { server.close(); }
+});

@@ -40,13 +40,18 @@ All of this is covered by tests: `npm test` (crypto fuzzing, hostile-relay and l
 
 ## One-tap calling (no app needed)
 - **Call someone:** tap *Create beacon*, then send the invite on WhatsApp or let them scan the **QR code**.
-- **The invite carries three links.** They share the same encryption key and differ only in a word after it:
-  - **✅ Answer** (`…#s.<key>.answer`) opens straight into the encrypted call, in the WeKoNet app or right in the browser. There is no install, sign-up or extra tap. The relay serves the web app at `/b/`.
-  - **❌ Decline** tells the caller "declined", sealed with the invite's own key. No camera, mic or identity is shared, and a declined 1-to-1 invite stops working at once.
-  - **🚫 Block** declines and blocks that caller's identity on this device. Their later calls are declined automatically. You can unblock them in *Settings → Blocked callers*.
-- A plain link without a word rings with **Answer / Decline / Block** buttons.
-- **During a browser call,** a *Download the app* button opens in a new tab, so the call keeps running. On Android it links straight to the APK.
-- **Encryption is unchanged.** The hybrid X25519 + P-384 + ML-KEM-768 handshake, the per-message ratchet, per-frame media encryption and the 6-word security check all apply exactly as before.
+- **The invite is one short link.** Tapping it rings, in the WeKoNet app or right in the browser, with no install or sign-up. The ringing screen shows the **caller's photo** and **Answer / Decline / Block**. The relay serves the web app at `/b/`.
+- **The QR code answers at once.** It holds the same link with `.answer` added. Adding `.decline` or `.block` instead does those actions directly. The word is in the URL fragment, so it never reaches a server.
+- **Decline** tells the caller "declined", sealed with the invite's own key. No camera, mic or identity is shared, and a declined 1-to-1 invite stops working at once.
+- **Block** declines and blocks that caller's identity on this device. Their later calls are declined automatically. You can unblock them in *Settings → Blocked callers*.
+- **Caller photo** (*Settings → Your photo*):
+  - The picture is shrunk on the device to a ~5 KB JPEG.
+  - It is **signed with the caller's identity key and bound to that one call**, then sealed with a key from the short link. The relay stores only ciphertext.
+  - The ringing phone checks the signature against the identity pinned in the beacon, so nobody can swap the photo. During the call, photos are exchanged over the encrypted channel and kept with saved contacts.
+  - A photo shows who the caller *claims* to be. The 6 security words and saved contacts are what prove it.
+- **During a browser call,** a *Download the app* button opens in a new tab, so the call keeps running.
+- **If a phone loses the relay** (network change, app in background), it reconnects and re-enters the room. A failed connection says why instead of hanging.
+- **Calls between phones on mobile data need TURN.** Set `CF_TURN_KEY_ID` and `CF_TURN_API_TOKEN` on the relay. `scripts/relay-check.mjs` (the *Relay check* workflow) reports whether TURN is being handed out.
 
 ## Links, calls on every network, app lock
 - **Short beacon links** (~47 characters, `https://wekonet.app/b/#s.…`): a sealed copy of the beacon is parked on your relay under an ID derived from the link's own key, so the relay holds only ciphertext. *Copy full link* (~340 characters, compact v2 format) still works if the relay restarts.

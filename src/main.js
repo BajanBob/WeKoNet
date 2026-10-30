@@ -10,7 +10,7 @@ import { h, setRich } from './ui/sanitize.js';
 import * as vault from './storage/vault.js';
 import { setSosRetention } from './storage/retention.js';
 import { makePinRecord, checkPin, validPin, MAX_FAILS, LOCK_AFTER } from './storage/lock.js';
-import { createBeacon, openBeacon, sealShort, parseShort, shortId, openShort, splitAction, actionLink } from './crypto/beacon.js';
+import { createBeacon, openBeacon, sealShort, parseShort, shortId, openShort, splitAction, actionLink, sealCard, cardId, openCard } from './crypto/beacon.js';
 import { b64u, unb64u } from './crypto/util.js';
 import { contactLinks, sealMail, openMail } from './crypto/contact.js';
 import { CallSession, E2EE_MEDIA, declineBeacon } from './net/mesh.js';
@@ -18,6 +18,7 @@ import { MailboxClient, warmRelay, relayRequest } from './net/signaling.js';
 import { LocationSharer, SOSBeacon, playSiren, SHARE_DURATIONS } from './features/geo.js';
 import { onBeacon, shareToWhatsApp, shareNative, platform, keepAlive, appDownload } from './platform.js';
 import { drawQR } from './ui/qr.js';
+import { makeThumb, isPhoto, photoImg } from './ui/photo.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -36,6 +37,7 @@ async function boot() {
   S.autoJoinContacts = await vault.settings.get('autoJoinContacts', true);
   S.sosKeep = await vault.settings.get('sosKeep', '3h'); setSosRetention(S.sosKeep);
   S.pin = await vault.settings.get('pin', null);
+  { const ph = await vault.settings.get('photo', null); S.photo = ph ? unb64u(ph) : null; }
   S.lockAfter = await vault.settings.get('lockAfter', '1m');
   if (S.pin) showLock();
   document.addEventListener('visibilitychange', () => {
@@ -169,7 +171,7 @@ async function saveContact(peer) {
   const pub = b64u(p.session.peerPub);
   if (S.contacts.some((c) => c.pub === pub)) return toast('Already saved');
   const name = peer.name || peer.id;
-  await vault.save('contact', { wid: peer.id, name, pub, pair: b64u(p.session.pairSecret), verified: !!peer.verified });
+  await vault.save('contact', { wid: peer.id, name, pub, pair: b64u(p.session.pairSecret), verified: !!peer.verified, ...(peer.photo ? { photo: b64u(peer.photo) } : {}) });
   await loadContacts(); startMailbox();
   toast(`${name} saved — they can now receive your SOS`);
 }
@@ -192,23 +194,21 @@ async function makeShortLink(b) {
   try {
     const s = await sealShort(b.fragment);
     await relayRequest(CONFIG.relayUrl, { op: 'stash', id: s.id, data: s.data, exp: b.payload.exp }, 'stashed', { maxWaitMs: 20e3 });
+    if (S.photo) { // caller photo for the ringing screen (signed, sealed; optional)
+      const card = await sealCard(s.k, { identity: S.identity, room: b.payload.room, photo: S.photo }).catch(() => null);
+      if (card) await relayRequest(CONFIG.relayUrl, { op: 'stash', kind: 'card', id: card.id, data: card.data, exp: b.payload.exp }, 'stashed', { maxWaitMs: 8e3 }).catch(() => {});
+    }
+    s.k.fill(0);
     return `${CONFIG.appBase}#${s.code}`;
   } catch { return null; }
 }
 
-/** The invite message: one-tap Answer / Decline / Block links (all carry the same key). */
+/** The invite message: one short link. It opens a ringing screen with the caller's
+ *  photo and Answer / Decline / Block — in the app, or right in the browser. */
 function inviteText(b) {
   const link = b.shortLink || b.link;
   const mins = Math.max(1, Math.round((b.payload.exp - Date.now()) / 60e3));
-  return [
-    `📞 ${S.identity.id} is calling you on WeKoNet — ${modeLabel(b.payload.mode).toLowerCase()}, end-to-end encrypted.`,
-    '',
-    `✅ Answer: ${actionLink(link, 'answer')}`,
-    `❌ Decline: ${actionLink(link, 'decline')}`,
-    `🚫 Block: ${actionLink(link, 'block')}`,
-    '',
-    `Tap Answer — it opens right in your browser, no app or sign-up needed. Expires in ${mins} min.`,
-  ].join('\n');
+  return `📞 Incoming WeKoNet ${modeLabel(b.payload.mode).toLowerCase()} — tap to answer:\n${link}\n\nEnd-to-end encrypted · no app needed · expires in ${mins} min`;
 }
 
 function copyText(text, done) {
@@ -223,14 +223,16 @@ function showShare(b) {
   let qr = null;
   try { qr = drawQR(h('canvas', { class: 'qr', role: 'img', 'aria-label': 'QR code: scan to answer the call' }), answer); } catch { /* too long for a QR code */ }
   modal('Call someone', h('div', {},
-    h('p', { text: 'Send the invite on WhatsApp, or let them scan the code. One tap answers the call — in the WeKoNet app or straight in their browser.' }),
+    h('p', { text: S.photo
+      ? 'Send the invite on WhatsApp. Their phone rings with your photo and Answer / Decline / Block — in the WeKoNet app or right in their browser. Or let them scan the code to answer at once.'
+      : 'Send the invite on WhatsApp. Their phone rings with Answer / Decline / Block — in the WeKoNet app or right in their browser. Tip: add your photo in Settings so they can see who is calling.' }),
     qr ? h('div', { class: 'qr-wrap' }, qr, h('span', { class: 'muted', text: 'Scan to answer' })) : null,
-    h('code', { class: 'beacon-link', text: answer }),
-    h('p', { class: 'muted', text: 'The invite also has Decline and Block links. The encryption key is after the “#”: it never reaches any server. Anyone with the link can answer until it expires, so send it only to the person you are calling.' })), [
+    h('code', { class: 'beacon-link', text: link }),
+    h('p', { class: 'muted', text: 'The encryption key is after the “#”: it never reaches any server. Anyone with the link can answer until it expires, so send it only to the person you are calling.' })), [
     ['WhatsApp', () => { shareToWhatsApp(text); b.sent = true; refresh('call'); }, 'btn-wa'],
     ['Share…', async () => { if (await shareNative(text)) { b.sent = true; refresh('call'); } }],
     ['Copy invite', () => copyText(text, 'Invite copied')],
-    ['Copy link', () => copyText(answer, 'Answer link copied')],
+    ['Copy link', () => copyText(link, 'Link copied')],
     ...(b.shortLink ? [['Copy full link', () => copyText(b.link, 'Full link copied — works even if the relay restarts')]] : []),
     ['Done', null, 'btn-ghost'],
   ]);
@@ -238,11 +240,13 @@ function showShare(b) {
 
 async function receiveBeacon(input) {
   const { link: frag0, action } = splitAction(input);
-  let frag = frag0, o;
+  let frag = frag0, o, cardP = null, shortKey = null, callerPhoto = null;
   try {
     const k = parseShort(frag);
     if (k) {
       toast('Opening short link…');
+      cardP = cardId(k).then((id) => relayRequest(CONFIG.relayUrl, { op: 'fetch', kind: 'card', id }, 'stash', { maxWaitMs: 8e3 })).then((r) => r.data, () => null);
+      shortKey = k;
       const r = await relayRequest(CONFIG.relayUrl, { op: 'fetch', id: await shortId(k) }, 'stash').catch((e) => {
         throw new Error(e.relayCode === 'no-such-link'
           ? 'This short link has expired or the relay restarted. Ask for a new beacon or the full link.'
@@ -252,6 +256,8 @@ async function receiveBeacon(input) {
     }
     o = await openBeacon(frag, Date.now(), { defaultRelay: CONFIG.relayUrl });
   } catch (e) { return toast(e.message, 'danger'); }
+  const card = await cardP;
+  if (card && shortKey) callerPhoto = await openCard(shortKey, card, { room: o.payload.room, inviterPub: o.inviterPub }).catch(() => null);
   if (o.payload.from === b64u(S.identity.pub)) return toast('This is your own invite — send it to the person you want to call', 'warn');
   const contact = S.contacts.find((c) => c.pub === o.payload.from);
   const who = contact ? `${contact.name} (${o.payload.fromId})` : o.payload.fromId;
@@ -271,16 +277,23 @@ async function receiveBeacon(input) {
   };
   if (action === 'answer') { toast(`Answering ${who}…`); return join(); }
   if (contact && S.autoJoinContacts) { toast(`Joining ${contact.name}’s call…`); return join(); }
-  ringing(o, who, contact, join);
+  ringing(o, who, contact, join, callerPhoto);
 }
 
 /** Incoming call screen for a plain link: Answer · Decline · Block. */
-function ringing(o, who, contact, join) {
+function ringing(o, who, contact, join, callerPhoto) {
+  // A saved contact's photo is the one YOU saved with their verified identity; a photo
+  // from the invite is only what the caller says they look like.
+  const saved = contact?.photo ? unb64u(contact.photo) : null;
+  const pic = saved || callerPhoto;
   modal(`${modeLabel(o.payload.mode)} from ${contact ? contact.name : o.payload.fromId}`, h('div', { class: 'ring' },
-    h('div', { class: 'ring-pulse', 'aria-hidden': 'true' }),
+    h('div', { class: `ring-pulse ${pic ? 'has-photo' : ''}`, 'aria-hidden': 'true' }, pic ? photoImg(pic, 'ring-photo', '') : null),
     h('p', {}, 'From ', h('strong', { text: who })),
     h('p', { text: `End-to-end encrypted · up to ${o.payload.max} people · ${lingerLabel(o.payload.linger)}` }),
-    h('p', { class: 'muted', text: contact ? 'Saved contact ✓' : 'Not a saved contact — compare the security words once connected.' })), [
+    h('p', { class: 'muted', text: contact
+      ? `Saved contact ✓${saved ? ' — this is the photo you saved' : ''}`
+      : pic ? 'Photo sent by the caller and signed by their WeKoNet ID. Anyone can use someone else’s picture, so check the security words once connected.'
+        : 'Not a saved contact — compare the security words once connected.' })), [
     ['Answer', join, 'btn-primary btn-answer'],
     ['Decline', () => declineCall(o, who), 'btn-ghost'],
     ['Block', () => blockCaller(o, who), 'btn-danger'],
@@ -332,6 +345,7 @@ async function startCall(beacon, role, mode) {
   call.addEventListener('peer-left', (e) => { const p = S.peers.get(e.detail.peer); S.peers.delete(e.detail.peer); dropVideo(e.detail.peer); S.map?.remove(e.detail.peer); if (p) toast(`${p.name} left (${e.detail.reason})`); refresh('call'); });
   call.addEventListener('peer-state', (e) => { const p = S.peers.get(e.detail.peer); if (p && p.state !== e.detail.state) { p.state = e.detail.state; refresh('call'); } });
   call.addEventListener('message', (e) => onPeerMessage(e.detail));
+  call.addEventListener('channel-open', (e) => { if (S.photo) call.sendTo(e.detail.peer, 'card', { p: b64u(S.photo) }); });
   call.addEventListener('room', (e) => { S.deadline = e.detail.deadline; refresh('call'); });
   call.addEventListener('security', (e) => toast(`Security: ${e.detail.message}`, 'danger'));
   call.addEventListener('warning', (e) => toast(e.detail.message, 'warn'));
@@ -360,6 +374,8 @@ async function onPeerMessage({ peer, from, kind, body }) {
     if (p) p.loc = body;
   } else if (kind === 'sos') {
     onSOS(name, body, peer);
+  } else if (kind === 'card' && p) {
+    try { const ph = unb64u(String(body.p || '')); if (isPhoto(ph)) { p.photo = ph; refresh('call'); } } catch { /* ignore bad photo */ }
   }
 }
 
@@ -473,6 +489,28 @@ function getAppCard() {
     d.url ? h('a', { class: 'btn btn-primary', href: d.url, target: '_blank', rel: 'noopener noreferrer', text: d.label }) : null);
 }
 
+/** Settings → Your photo: shown on the other person's ringing screen and call tile. */
+function photoCard() {
+  const input = h('input', { type: 'file', class: 'sr-only', 'aria-label': 'Choose your photo' });
+  input.accept = 'image/*';
+  input.addEventListener('change', async () => {
+    try {
+      const bytes = await makeThumb(input.files?.[0]);
+      S.photo = bytes; await vault.settings.set('photo', b64u(bytes));
+      toast('Photo saved — people you call will see it when their phone rings');
+    } catch (e) { toast(e.message, 'warn'); }
+    refresh('settings');
+  });
+  return h('section', { class: 'card photo-card' }, h('h2', { text: 'Your photo' }),
+    h('div', { class: 'row' },
+      S.photo ? photoImg(S.photo, 'avatar avatar-lg', 'Your photo') : h('div', { class: 'avatar avatar-lg avatar-empty', 'aria-hidden': 'true', text: '?' }),
+      h('p', { class: 'muted', text: 'Shown on the ringing screen of the people you call, so they know it’s you before answering. It is shrunk to a small picture, signed with your WeKoNet ID and end-to-end encrypted. It never leaves this device in any other way.' })),
+    h('div', { class: 'row wrap' },
+      h('button', { class: 'btn btn-primary', type: 'button', text: S.photo ? 'Change photo' : 'Add a photo', onclick: () => input.click() }),
+      S.photo ? h('button', { class: 'btn btn-ghost', type: 'button', text: 'Remove', onclick: async () => { S.photo = null; await vault.settings.set('photo', null); refresh('settings'); } }) : null),
+    input);
+}
+
 function seg(name, options, initial) {
   const wrap = h('div', { class: 'seg', role: 'radiogroup', 'aria-label': name });
   for (const [val, label] of options) {
@@ -531,6 +569,7 @@ const VIEWS = {
 
     const contacts = h('section', { class: 'card' }, h('h2', { text: 'Saved connections' }),
       S.contacts.length ? h('ul', { class: 'list' }, S.contacts.map((c) => h('li', { class: 'contact' },
+        c.photo ? photoImg(unb64u(c.photo), 'avatar', '') : null,
         h('div', {}, h('strong', { text: c.name }), h('div', { class: 'mono muted', text: c.wid }), c.verified ? h('span', { class: 'badge ok', text: 'Verified' }) : h('span', { class: 'badge', text: 'Not verified' })),
         h('div', { class: 'row' },
           h('button', { class: 'btn btn-sm', type: 'button', text: 'Voice', onclick: () => beaconContact(c, 'voice') }),
@@ -551,10 +590,12 @@ const VIEWS = {
     const me = videoFor('me', S.localStream, true);
     const hasVideo = (st) => S.call.mode === 'video' && !!st?.getVideoTracks().length;
     const initials = (n) => String(n).replace(/^WKN-/, '').slice(0, 2);
-    tiles.append(h('figure', { class: `tile me ${hasVideo(S.localStream) ? '' : 'novideo'}`, dataset: { initials: 'You' } }, me, h('figcaption', { text: 'You' })));
+    const facePic = (bytes, video) => (!video && bytes ? photoImg(bytes, 'tile-photo', '') : null);
+    tiles.append(h('figure', { class: `tile me ${hasVideo(S.localStream) ? '' : 'novideo'}`, dataset: { initials: 'You' } }, me, facePic(S.photo, hasVideo(S.localStream)), h('figcaption', { text: 'You' })));
     for (const p of S.peers.values()) {
       const v = videoFor(p.peerId, p.stream, false);
-      tiles.append(h('figure', { class: `tile ${hasVideo(p.stream) ? '' : 'novideo'}`, dataset: { initials: initials(p.name) } }, v, h('figcaption', {},
+      const saved = S.contacts.find((c) => c.wid === p.id)?.photo;
+      tiles.append(h('figure', { class: `tile ${hasVideo(p.stream) ? '' : 'novideo'}`, dataset: { initials: initials(p.name) } }, v, facePic(saved ? unb64u(saved) : p.photo, hasVideo(p.stream)), h('figcaption', {},
         h('span', { text: p.name }),
         p.state && p.state !== 'connected' ? h('span', { class: 'badge', text: p.state === 'failed' ? 'No connection' : 'Connecting…' }) : null,
         p.verified ? h('span', { class: 'badge ok', text: 'Verified' }) : h('span', { class: 'badge warn', text: 'Check words' }))));
@@ -655,6 +696,7 @@ const VIEWS = {
 
     return h('div', { class: 'stack' },
       h('section', { class: 'card' }, h('h2', { text: 'Face plate' }), plateRow),
+      photoCard(),
       h('section', { class: 'card' }, h('h2', { text: 'Your WeKoNet ID' }),
         h('p', { class: 'mono big', text: S.identity.id }),
         h('p', { class: 'muted', text: 'Derived from your device’s P-384 identity key. People connect to you through beacons, never by phone number or email.' })),

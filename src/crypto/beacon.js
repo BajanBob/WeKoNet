@@ -169,7 +169,7 @@ async function shortKeys(k) {
 export async function sealShort(fragment) {
   const k = randomBytes(16);
   const { id, key } = await shortKeys(k);
-  return { code: `s.${b64u(k)}`, id, data: b64u(await seal(key, te.encode(fragment), AADS)) };
+  return { code: `s.${b64u(k)}`, k, id, data: b64u(await seal(key, te.encode(fragment), AADS)) };
 }
 
 export function parseShort(linkOrFragment) {
@@ -200,3 +200,41 @@ export function splitAction(linkOrFragment) {
   return m ? { link: m[1], action: m[2] } : { link: s, action: null };
 }
 export const actionLink = (link, action) => `${link}.${action}`;
+
+// ---------- caller card (photo on the ringing screen) ----------
+// A small JPEG of the caller, signed with the caller's identity key and bound to
+// this one call (room), then sealed with a key derived from the short link. The
+// relay stores ciphertext it cannot open; the person called checks the signature
+// against the identity pinned in the beacon, so nobody can swap in another photo.
+// A photo shows who the caller CLAIMS to be — the security words and saved
+// contacts are what actually prove it.
+const AADC = te.encode('WeKoNet caller card v1');
+export const CARD_PHOTO_MAX = 8000; // bytes of JPEG
+async function cardKeys(k) {
+  return {
+    id: b64u(await hkdf384(k, SALT, 'caller card id', 12)),
+    key: await aesKey(await hkdf384(k, SALT, 'caller card key', 32)),
+  };
+}
+const cardSigInput = (room, photo) => lp('caller card v1', room, photo);
+
+export async function sealCard(k, { identity, room, photo }) {
+  if (!(photo instanceof Uint8Array) || photo.length < 4 || photo.length > CARD_PHOTO_MAX) throw new Error('photo too large');
+  const { id, key } = await cardKeys(k);
+  const sig = await sign(identity.privateKey, cardSigInput(room, photo));
+  const pt = te.encode(JSON.stringify({ p: b64u(photo), s: b64u(sig) }));
+  return { id, data: b64u(await seal(key, pt, AADC)) };
+}
+
+export async function cardId(k) { return (await cardKeys(k)).id; }
+
+/** Returns the verified JPEG bytes, or throws. */
+export async function openCard(k, data, { room, inviterPub }) {
+  const { key } = await cardKeys(k);
+  const pt = await open(key, unb64u(data), AADC).catch(() => { throw new Error('caller card was tampered with'); });
+  const { p, s } = JSON.parse(td.decode(pt));
+  const photo = unb64u(p);
+  if (photo.length > CARD_PHOTO_MAX || photo[0] !== 0xff || photo[1] !== 0xd8) throw new Error('caller card is not a photo');
+  if (!(await verify(inviterPub, unb64u(s), cardSigInput(room, photo)))) throw new Error('caller photo signature invalid');
+  return photo;
+}

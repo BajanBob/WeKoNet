@@ -22,9 +22,10 @@ async function createBeacon(page, mode) {
   return (await code.textContent()).trim();
 }
 
-// The shared link is the one-tap Answer link: opening it joins the call directly.
+// The shared link rings: Answer / Decline / Block.
 async function joinFromLink(page, link) {
   await page.goto(link);
+  await page.getByRole('button', { name: 'Answer', exact: true }).click();
 }
 
 test('chat call: short link, matching security words, message delivered, end for all', async ({ browser }) => {
@@ -32,8 +33,8 @@ test('chat call: short link, matching security words, message delivered, end for
   const B = await person(browser, 'guest');
 
   const link = await createBeacon(A.page, 'Chat');
-  expect(link).toMatch(/\/b\/#s\.[A-Za-z0-9_-]{22}\.answer$/);
-  expect(link.length).toBeLessThan(75);
+  expect(link).toMatch(/\/b\/#s\.[A-Za-z0-9_-]{22}$/);
+  expect(link.length).toBeLessThan(60);
   await A.page.getByRole('button', { name: 'Done' }).click();
 
   await joinFromLink(B.page, link);

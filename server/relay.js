@@ -56,7 +56,9 @@ async function refreshTurn() {
 export const turnConfigured = () => !!turnIce;
 let turnTimer = null;
 
-const STASH_MAX = 50000, STASH_PER_IP_HOUR = 30, STASH_MAX_TTL = 125 * 60e3;
+const STASH_MAX = 50000, STASH_PER_IP_HOUR = 60, STASH_MAX_TTL = 125 * 60e3;
+// Caller cards (sealed + signed caller photo shown on the ringing screen): bigger, so fewer.
+const CARD_MAX = 2000, CARD_MAX_CHARS = 12000;
 
 const okId = (s, min = 16, max = 64) => typeof s === 'string' && s.length >= min && s.length <= max && /^[A-Za-z0-9_-]+$/.test(s);
 const sha384 = (s) => crypto.createHash('sha384').update(Buffer.from(s, 'base64url')).digest('base64url');
@@ -82,12 +84,13 @@ function createCore() {
   const ipPending = new Map(); // ip → unanswered rooms created
   const ipBoxes = new Map();   // ip → { n, since }
   const stash = new Map();     // short-link id → { data, exp }  (sealed beacons; the relay cannot open them)
+  const cards = new Map();     // caller-card id → { data, exp } (sealed photos; the relay cannot open them)
   const stashByIp = new Map(); // ip → { n, since }
   const hasOwn = (o, k) => typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k);
 
   function stats() {
     let connections = 0; for (const n of ipCount.values()) connections += n;
-    return { rooms: rooms.size, mailboxes: mailboxes.size, stash: stash.size, connections };
+    return { rooms: rooms.size, mailboxes: mailboxes.size, stash: stash.size, cards: cards.size, connections };
   }
 
   function dropRoom(key) {
@@ -261,22 +264,23 @@ function createCore() {
         mailboxes.set(m.box, q);
         return c.send({ op: 'posted', box: m.box });
       }
-      case 'stash': { // park a sealed beacon for a short link until it expires
-        if (!okId(m.id, 16, 16) || typeof m.data !== 'string' || m.data.length > 3000 || !/^[A-Za-z0-9_-]+$/.test(m.data)) throw 0;
+      case 'stash': { // park a sealed beacon (or sealed caller card) for a short link until it expires
+        const card = m.kind === 'card', store = card ? cards : stash;
+        if (!okId(m.id, 16, 16) || typeof m.data !== 'string' || m.data.length > (card ? CARD_MAX_CHARS : 3000) || !/^[A-Za-z0-9_-]+$/.test(m.data)) throw 0;
         const now = Date.now();
         const exp = Math.min(Number(m.exp) || 0, now + STASH_MAX_TTL);
         if (!(exp > now)) throw 0;
         const q = stashByIp.get(c.ip) || { n: 0, since: now };
         if (now - q.since > 3600e3) { q.n = 0; q.since = now; }
-        if (q.n >= STASH_PER_IP_HOUR || stash.size >= STASH_MAX) return c.send({ op: 'error', code: 'busy', id: m.id });
-        if (stash.has(m.id)) throw 0;
+        if (q.n >= STASH_PER_IP_HOUR || store.size >= (card ? CARD_MAX : STASH_MAX)) return c.send({ op: 'error', code: 'busy', id: m.id });
+        if (store.has(m.id)) throw 0;
         q.n++; stashByIp.set(c.ip, q);
-        stash.set(m.id, { data: m.data, exp });
+        store.set(m.id, { data: m.data, exp });
         return c.send({ op: 'stashed', id: m.id });
       }
       case 'fetch': {
         if (!okId(m.id, 16, 16)) throw 0;
-        const e = stash.get(m.id);
+        const e = (m.kind === 'card' ? cards : stash).get(m.id);
         if (!e || e.exp < Date.now()) return c.send({ op: 'error', code: 'no-such-link', id: m.id });
         return c.send({ op: 'stash', id: m.id, data: e.data });
       }
@@ -289,6 +293,7 @@ function createCore() {
   function sweep() {
     const now = Date.now();
     for (const [k, e] of stash) if (e.exp < now) stash.delete(k);
+    for (const [k, e] of cards) if (e.exp < now) cards.delete(k);
     for (const [ip, q] of stashByIp) if (now - q.since > 3600e3) stashByIp.delete(ip);
     for (const [k, r] of rooms) {
       const dead = (!r.started && now > r.exp && r.peers.size === 0) ||
