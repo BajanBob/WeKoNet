@@ -249,7 +249,8 @@ await scenario('verification: no words prompt on video calls; voice call offers 
   await D.waitForSelector('.card.sas >> text=Switch to video', { timeout: 20000 });
   assert.match(await D.innerText('.card.sas'), /optional/);
   await D.click('.card.sas >> text=Switch to video');
-  await C.waitForFunction(() => [...document.querySelectorAll('.tile:not(.me) video')].some((v) => v.videoWidth > 0), null, { timeout: 20000 });
+  await C.waitForFunction(() => [...document.querySelectorAll('.tile:not(.me) video')].some((v) => v.videoWidth > 0), null, { timeout: 20000 })
+    .catch(async (e) => { throw new Error(`${e.message} · C tiles: ${JSON.stringify(await C.$$eval('.tile', (t) => t.map((x) => [x.className, x.dataset.v, x.querySelector('video')?.videoWidth])))} · D tiles: ${JSON.stringify(await D.$$eval('.tile', (t) => t.map((x) => [x.className, x.dataset.v, x.querySelector('video')?.videoWidth])))} · D toasts: ${JSON.stringify(await toasts(D))}`); });
   await C.click('.controls >> text=Video');
   await D.waitForSelector('.card.sas >> text=Yes, it’s them', { timeout: 20000 });
   await shot(D, 'e2e-video-verify');

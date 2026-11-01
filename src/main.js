@@ -360,13 +360,14 @@ async function goVideo(p = null) {
  *  a man-in-the-middle can't fake a live face), or compare security words. Not shown on video
  *  calls or for saved, verified contacts. */
 function verifyCard(p) {
-  const words = h('details', { class: 'sas-more' },
+  const words = h('details', { class: 'sas-more', ontoggle: (e) => { p.wordsOpen = e.currentTarget.open; } },
     h('summary', { text: 'Security words (optional)' }),
     h('p', { class: 'sas-words', text: p.sas }),
     h('p', { class: 'muted', text: 'Read them aloud: if they see the same six words, nobody is intercepting the call.' }),
     h('div', { class: 'row' },
       h('button', { class: 'btn btn-primary btn-sm', type: 'button', text: 'Words match', onclick: () => { p.verified = true; refresh('call'); } }),
       h('button', { class: 'btn btn-danger btn-sm', type: 'button', text: 'They don’t match', onclick: () => { toast('Words differ — possible interception. Call ended.', 'danger'); S.call.end(true); } })));
+  words.open = !!p.wordsOpen; // stays open when the screen refreshes
   if (isVideoCall(p)) {
     // Switched to video to check who it is: one tap to confirm once their face is showing.
     if (p.videoCheck && liveVideo(p.stream)) return h('section', { class: 'card sas' },
@@ -688,7 +689,7 @@ const VIEWS = {
     for (const p of S.peers.values()) {
       const v = videoFor(p.peerId, p.stream, false);
       const saved = S.contacts.find((c) => c.wid === p.id)?.photo;
-      tiles.append(h('figure', { class: `tile ${hasVideo(p.stream) ? '' : 'novideo'}`, dataset: { initials: initials(p.name) } }, v, facePic(saved ? unb64u(saved) : p.photo, hasVideo(p.stream)), h('figcaption', {},
+      tiles.append(h('figure', { class: `tile ${hasVideo(p.stream) ? '' : 'novideo'}`, dataset: { initials: initials(p.name), v: (p.stream?.getVideoTracks() || []).map((t) => `${t.readyState}${t.muted ? '-muted' : ''}`).join(',') || 'none' } }, v, facePic(saved ? unb64u(saved) : p.photo, hasVideo(p.stream)), h('figcaption', {},
         h('span', { text: p.name }),
         p.state && p.state !== 'connected' ? h('span', { class: 'badge', text: p.state === 'failed' ? 'No connection' : 'Connecting…' }) : null,
         p.verified ? h('span', { class: 'badge ok', text: 'Verified' }) : isVideoCall(p) ? null : h('span', { class: 'badge', text: 'New contact' }))));
@@ -719,7 +720,7 @@ const VIEWS = {
     const save = [...S.peers.values()].filter((p) => !S.contacts.some((c) => c.wid === p.id)).map((p) =>
       h('button', { class: 'btn btn-sm', type: 'button', text: `Save connection: ${p.name}`, onclick: () => saveContact(p) }));
 
-    return h('div', { class: 'stack call' }, status, tiles, waiting, ctl, getAppCard(), save.length ? h('div', { class: 'row wrap save-row' }, save) : null, ...verify);
+    return h('div', { class: 'stack call' }, status, ...verify, tiles, waiting, ctl, getAppCard(), save.length ? h('div', { class: 'row wrap save-row' }, save) : null);
   },
 
   chat() {
