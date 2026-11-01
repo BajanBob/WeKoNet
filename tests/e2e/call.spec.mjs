@@ -40,6 +40,9 @@ test('chat call: short link, matching security words, message delivered, end for
   await joinFromLink(B.page, link);
 
   // Both sides finished the hybrid handshake and show the same six security words.
+  // On a chat/voice call with a new contact the check is optional: Switch to video, or open the words.
+  await expect(A.page.getByRole('button', { name: 'Switch to video' })).toBeVisible();
+  await A.page.locator('.sas-more summary').click(); await B.page.locator('.sas-more summary').click();
   const wa = A.page.locator('.sas-words'), wb = B.page.locator('.sas-words');
   await expect(wa).toBeVisible(); await expect(wb).toBeVisible();
   expect((await wa.textContent()).trim()).toBe((await wb.textContent()).trim());

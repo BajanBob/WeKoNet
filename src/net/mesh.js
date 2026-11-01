@@ -106,6 +106,23 @@ export class CallSession extends EventTarget {
   toggleMic(on) { this.local?.getAudioTracks().forEach((t) => { t.enabled = on; }); }
   toggleCam(on) { this.local?.getVideoTracks().forEach((t) => { t.enabled = on; }); }
 
+  /** Turn a voice (or chat) call into video without reconnecting: every call already has an
+   *  encrypted video channel, so the camera is just plugged into it. Used to see who you're
+   *  talking to (a cloned voice or a man-in-the-middle can't fake a live face this way). */
+  async enableVideo() {
+    if (this.local?.getVideoTracks().length) { this.toggleCam(true); this.mode = 'video'; return; }
+    const s = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' } });
+    const nt = s.getVideoTracks()[0];
+    if (!this.local) this.local = new MediaStream();
+    this.local.addTrack(nt);
+    for (const p of this.peers.values()) {
+      const tr = p.pc?.getTransceivers().find((t) => t.receiver.track.kind === 'video');
+      if (tr) await tr.sender.replaceTrack(nt);
+    }
+    this.mode = 'video';
+    this.emit('local-stream', { stream: this.local });
+  }
+
   async switchCamera() {
     const cur = this.local?.getVideoTracks()[0];
     if (!cur) return;
@@ -261,7 +278,13 @@ export class CallSession extends EventTarget {
     pc.ontrack = (e) => {
       const kind = e.track.kind;
       this.#protectOnce(p, e.receiver, 'decrypt', p.session.recv[kind], kind);
-      this.emit('remote-track', { peer: peerId, stream: e.streams[0] || new MediaStream([e.track]) });
+      // One stream per person holding their audio and video, so turning video on mid-call just works.
+      p.remote ||= new MediaStream();
+      if (!p.remote.getTracks().includes(e.track)) p.remote.addTrack(e.track);
+      const changed = () => this.emit('remote-track', { peer: peerId, stream: p.remote });
+      e.track.addEventListener('unmute', changed);
+      e.track.addEventListener('mute', changed);
+      changed();
     };
   }
 

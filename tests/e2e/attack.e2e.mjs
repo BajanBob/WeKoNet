@@ -233,6 +233,31 @@ await scenario('answer stays on screen: closing the ringing pop-up (Back / Esc) 
   await endAll(A, B);
 });
 
+await scenario('verification: no words prompt on video calls; voice call offers Switch to video, then "Is it really them?"', async () => {
+  const A = await person('A'), B = await person('B');
+  let link = await hostBeacon(A, { mode: 'video' });
+  await openLink(B, link);
+  await A.waitForSelector('.sas-words', { state: 'attached', timeout: 20000 });
+  await waitVideos(B, 1);
+  assert.equal(await B.$('.card.sas'), null, 'no security-words prompt on a video call');
+  assert.equal(await B.$$eval('.badge', (b) => b.filter((x) => /Check words/.test(x.textContent)).length), 0);
+  await endAll(A, B);
+
+  const C = await person('C'), D = await person('D');
+  link = await hostBeacon(C, { mode: 'voice' });
+  await openLink(D, link);
+  await D.waitForSelector('.card.sas >> text=Switch to video', { timeout: 20000 });
+  assert.match(await D.innerText('.card.sas'), /optional/);
+  await D.click('.card.sas >> text=Switch to video');
+  await C.waitForFunction(() => [...document.querySelectorAll('.tile:not(.me) video')].some((v) => v.videoWidth > 0), null, { timeout: 20000 });
+  await C.click('.controls >> text=Video');
+  await D.waitForSelector('.card.sas >> text=Yes, it’s them', { timeout: 20000 });
+  await shot(D, 'e2e-video-verify');
+  await D.click('.card.sas >> text=Yes, it’s them');
+  await D.waitForSelector('.badge.ok');
+  await endAll(C, D);
+});
+
 await scenario('decline link: caller is told at once and the invite dies; nobody gets camera or mic', async () => {
   const A = await person('A'), B = await person('B'), C = await person('C');
   const link = await hostBeacon(A, { mode: 'voice' });
@@ -273,7 +298,7 @@ await scenario('block link: caller blocked, later calls from them are auto-decli
   await waitToast(B, /unblocked/);
   const link3 = await hostBeacon(A, { mode: 'chat' });
   await openLink(B, link3);
-  await A.waitForSelector('.sas-words', { timeout: 20000 });
+  await A.waitForSelector('.sas-words', { state: 'attached', timeout: 20000 });
   await endAll(A, B);
 });
 
@@ -306,7 +331,7 @@ await scenario('injection: hostile chat messages never execute; Trusted Types + 
   const A = await person('A'), B = await person('B');
   const link = await hostBeacon(A, { mode: 'chat' });
   await openLink(B, link);
-  await A.waitForSelector('.sas-words', { timeout: 20000 });
+  await A.waitForSelector('.sas-words', { state: 'attached', timeout: 20000 });
   const payloads = [
     '<img src=x onerror="window.__pwned=1">',
     '<svg/onload=window.__pwned=2>',
@@ -452,7 +477,7 @@ await scenario('guest "Remove everything" really erases identity and storage', a
   const A = await person('A'), B = await person('B');
   const link = await hostBeacon(A, { mode: 'chat' });
   await openLink(B, link);
-  await B.waitForSelector('.sas-words', { timeout: 20000 });
+  await B.waitForSelector('.sas-words', { state: 'attached', timeout: 20000 });
   const idBefore = await B.innerText('#my-id');
   await A.click('.ctl.end');
   await B.waitForSelector('text=Remove everything'); await B.click('button:has-text("Remove everything")');
@@ -469,7 +494,7 @@ await scenario('expired beacon: link cannot be reused after the call ends', asyn
   const A = await person('A'), B = await person('B'), C = await person('C');
   const link = await hostBeacon(A, { mode: 'chat' });
   await openLink(B, link);
-  await A.waitForSelector('.sas-words', { timeout: 20000 });
+  await A.waitForSelector('.sas-words', { state: 'attached', timeout: 20000 });
   await A.click('.ctl.end');
   await sleep(800);
   await openLink(C, link);

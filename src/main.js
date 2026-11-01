@@ -335,12 +335,56 @@ function ringDialog(o, who, contact, join, callerPhoto) {
     h('p', { text: `End-to-end encrypted · up to ${o.payload.max} people · ${lingerLabel(o.payload.linger)}` }),
     h('p', { class: 'muted', text: contact
       ? `Saved contact ✓${saved ? ' — this is the photo you saved' : ''}`
-      : pic ? 'Photo sent by the caller and signed by their WeKoNet ID. Anyone can use someone else’s picture, so check the security words once connected.'
-        : 'Not a saved contact — compare the security words once connected.' })), [
+      : `${pic ? 'Photo sent by the caller and signed by their WeKoNet ID (anyone can use someone else’s picture). ' : 'Not a saved contact. '}${o.payload.mode === 'video' ? 'You’ll see them on video once connected.' : 'Once connected you can switch to video to see it’s really them.'}` })), [
     ['Answer', join, 'btn-primary btn-answer'],
     ['Decline', () => { clearRing(); declineCall(o, who); }, 'btn-ghost'],
     ['Block', () => { clearRing(); blockCaller(o, who); }, 'btn-danger'],
   ]);
+}
+
+/** Is a live picture coming through on this stream? */
+function liveVideo(st) { return !!st?.getVideoTracks().some((t) => t.readyState === 'live' && t.enabled && !t.muted); }
+/** Video calls need no security words: you can see the person. */
+function isVideoCall(p) { return S.call?.mode === 'video' || liveVideo(p?.stream); }
+
+async function goVideo(p = null) {
+  try {
+    await S.call.enableVideo();
+    if (p) p.videoCheck = true;
+    toast('Video on — ask them to tap Video too, so you can see each other');
+    refresh('call');
+  } catch { toast('Couldn’t start the camera — allow camera access for WeKoNet and try again', 'warn'); }
+}
+
+/** Optional check for NEW contacts on voice and chat calls: see them on video (a cloned voice or
+ *  a man-in-the-middle can't fake a live face), or compare security words. Not shown on video
+ *  calls or for saved, verified contacts. */
+function verifyCard(p) {
+  const words = h('details', { class: 'sas-more' },
+    h('summary', { text: 'Security words (optional)' }),
+    h('p', { class: 'sas-words', text: p.sas }),
+    h('p', { class: 'muted', text: 'Read them aloud: if they see the same six words, nobody is intercepting the call.' }),
+    h('div', { class: 'row' },
+      h('button', { class: 'btn btn-primary btn-sm', type: 'button', text: 'Words match', onclick: () => { p.verified = true; refresh('call'); } }),
+      h('button', { class: 'btn btn-danger btn-sm', type: 'button', text: 'They don’t match', onclick: () => { toast('Words differ — possible interception. Call ended.', 'danger'); S.call.end(true); } })));
+  if (isVideoCall(p)) {
+    // Switched to video to check who it is: one tap to confirm once their face is showing.
+    if (p.videoCheck && liveVideo(p.stream)) return h('section', { class: 'card sas' },
+      h('h3', { text: `Is it really ${p.name}?` }),
+      h('p', { class: 'muted', text: 'You can see them live on video, so a cloned voice or an impostor can’t pretend to be them.' }),
+      h('div', { class: 'row' },
+        h('button', { class: 'btn btn-primary btn-sm', type: 'button', text: 'Yes, it’s them', onclick: () => { p.verified = true; refresh('call'); } }),
+        h('button', { class: 'btn btn-danger btn-sm', type: 'button', text: 'No — end call', onclick: () => { toast('Call ended — not the person you expected.', 'danger'); S.call.end(true); } })));
+    return h('div', { class: 'sas-quiet' }, words); // no prompt on video calls
+  }
+  if (p.dismissed) return h('div', { class: 'sas-quiet' }, words);
+  return h('section', { class: 'card sas' },
+    h('h3', { text: `New contact: make sure it’s really ${p.name} (optional)` }),
+    h('p', { class: 'muted', text: p.videoCheck ? 'Waiting for their video… ask them to tap Video.' : 'Switch to video to see them: the surest way to rule out a cloned voice or someone in the middle.' }),
+    h('div', { class: 'row' },
+      p.videoCheck ? null : h('button', { class: 'btn btn-primary btn-sm', type: 'button', text: 'Switch to video', onclick: () => goVideo(p) }),
+      h('button', { class: 'btn btn-ghost btn-sm', type: 'button', text: 'Not now', onclick: () => { p.dismissed = true; refresh('call'); } })),
+    words);
 }
 
 async function declineCall(o, who) {
@@ -384,7 +428,13 @@ async function startCall(beacon, role, mode) {
     toast(`${c?.name || d.id} connected · end-to-end encrypted`);
     refresh('call');
   });
-  call.addEventListener('remote-track', (e) => { const p = S.peers.get(e.detail.peer); if (p) { p.stream = e.detail.stream; refresh('call'); } });
+  call.addEventListener('remote-track', (e) => {
+    const p = S.peers.get(e.detail.peer); if (!p) return;
+    const before = liveVideo(p.stream);
+    p.stream = e.detail.stream;
+    if (!before && liveVideo(p.stream) && S.call?.mode !== 'video') toast(`${p.name} turned on video — tap Video to show yours`);
+    refresh('call');
+  });
   call.addEventListener('peer-left', (e) => { const p = S.peers.get(e.detail.peer); S.peers.delete(e.detail.peer); dropVideo(e.detail.peer); S.map?.remove(e.detail.peer); if (p) toast(`${p.name} left (${e.detail.reason})`); refresh('call'); });
   call.addEventListener('peer-state', (e) => { const p = S.peers.get(e.detail.peer); if (p && p.state !== e.detail.state) { p.state = e.detail.state; refresh('call'); } });
   call.addEventListener('message', (e) => onPeerMessage(e.detail));
@@ -631,7 +681,7 @@ const VIEWS = {
     }
     const tiles = h('div', { class: `grid n${1 + S.peers.size}` });
     const me = videoFor('me', S.localStream, true);
-    const hasVideo = (st) => S.call.mode === 'video' && !!st?.getVideoTracks().length;
+    const hasVideo = (st) => liveVideo(st);
     const initials = (n) => String(n).replace(/^WKN-/, '').slice(0, 2);
     const facePic = (bytes, video) => (!video && bytes ? photoImg(bytes, 'tile-photo', '') : null);
     tiles.append(h('figure', { class: `tile me ${hasVideo(S.localStream) ? '' : 'novideo'}`, dataset: { initials: 'You' } }, me, facePic(S.photo, hasVideo(S.localStream)), h('figcaption', { text: 'You' })));
@@ -641,25 +691,22 @@ const VIEWS = {
       tiles.append(h('figure', { class: `tile ${hasVideo(p.stream) ? '' : 'novideo'}`, dataset: { initials: initials(p.name) } }, v, facePic(saved ? unb64u(saved) : p.photo, hasVideo(p.stream)), h('figcaption', {},
         h('span', { text: p.name }),
         p.state && p.state !== 'connected' ? h('span', { class: 'badge', text: p.state === 'failed' ? 'No connection' : 'Connecting…' }) : null,
-        p.verified ? h('span', { class: 'badge ok', text: 'Verified' }) : h('span', { class: 'badge warn', text: 'Check words' }))));
+        p.verified ? h('span', { class: 'badge ok', text: 'Verified' }) : isVideoCall(p) ? null : h('span', { class: 'badge', text: 'New contact' }))));
     }
     const waiting = S.peers.size === 0 ? h('div', { class: 'waiting' },
       h('div', { class: 'pulse' }), h('p', { text: S.role === 'host' ? (S.beacon?.sent ? 'Beacon sent ✓ — waiting for them to tap Answer…' : 'Waiting for your contact to open the beacon…') : 'Connecting securely…' }),
+      S.role === 'host' ? h('p', { class: 'muted small', text: `They will see your ID ${S.identity.id}. If they say they answered but you still see this, they opened an old link: tap “Share beacon again” and ask them to use only the newest one.` }) : null,
       S.role === 'host' && S.beacon ? h('button', { class: 'btn', type: 'button', text: 'Share beacon again', onclick: () => showShare(S.beacon) }) : null) : null;
 
-    const verify = [...S.peers.values()].filter((p) => !p.verified).map((p) => h('section', { class: 'card sas' },
-      h('h3', { text: `Read these words aloud with ${p.name}` }),
-      h('p', { class: 'sas-words', text: p.sas }),
-      h('p', { class: 'muted', text: 'If they see the same six words, nobody is intercepting the call.' }),
-      h('div', { class: 'row' },
-        h('button', { class: 'btn btn-primary btn-sm', type: 'button', text: 'Words match', onclick: () => { p.verified = true; refresh('call'); } }),
-        h('button', { class: 'btn btn-danger btn-sm', type: 'button', text: 'They don’t match', onclick: () => { toast('Words differ — possible interception. Call ended.', 'danger'); S.call.end(true); } }))));
+    const verify = [...S.peers.values()].filter((p) => !p.verified).map((p) => verifyCard(p));
 
     let micOn = S.localStream?.getAudioTracks()[0]?.enabled ?? true;
     let camOn = S.localStream?.getVideoTracks()[0]?.enabled ?? true;
     const ctl = h('div', { class: 'controls' },
       h('button', { class: `ctl ${micOn ? '' : 'off'}`, type: 'button', 'aria-label': 'Microphone', text: micOn ? 'Mic' : 'Muted', onclick: (e) => { micOn = !micOn; S.call.toggleMic(micOn); e.currentTarget.textContent = micOn ? 'Mic' : 'Muted'; e.currentTarget.classList.toggle('off', !micOn); } }),
-      h('button', { class: `ctl ${camOn ? '' : 'off'}`, type: 'button', 'aria-label': 'Camera', text: camOn ? 'Cam' : 'Cam off', onclick: (e) => { camOn = !camOn; S.call.toggleCam(camOn); e.currentTarget.textContent = camOn ? 'Cam' : 'Cam off'; e.currentTarget.classList.toggle('off', !camOn); } }),
+      S.localStream?.getVideoTracks().length
+        ? h('button', { class: `ctl ${camOn ? '' : 'off'}`, type: 'button', 'aria-label': 'Camera', text: camOn ? 'Cam' : 'Cam off', onclick: (e) => { camOn = !camOn; S.call.toggleCam(camOn); e.currentTarget.textContent = camOn ? 'Cam' : 'Cam off'; e.currentTarget.classList.toggle('off', !camOn); } })
+        : h('button', { class: 'ctl', type: 'button', 'aria-label': 'Turn on video', text: 'Video', onclick: () => goVideo() }),
       h('button', { class: 'ctl', type: 'button', text: 'Flip', 'aria-label': 'Switch camera', onclick: () => S.call.switchCamera() }),
       h('button', { class: 'ctl', type: 'button', text: 'Chat', onclick: () => go('chat') }),
       h('button', { class: 'ctl end', type: 'button', text: 'End', 'aria-label': 'End call', onclick: endCall }));

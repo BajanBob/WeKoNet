@@ -267,3 +267,9 @@ html[data-locked] dialog.ring-dialog { display: none; }
 .modal { max-height: 92vh; overflow-y: auto; }
 .ring-dialog .modal-actions { position: sticky; bottom: -20px; background: var(--bg2); padding-bottom: 4px; }
 .ring-dialog .modal-actions .btn-answer { flex: 1 1 100%; order: -1; }
+
+/* Security words: optional, folded away */
+.sas-more { margin-top: 8px; }
+.sas-more summary { cursor: pointer; color: var(--muted); font-size: .9rem; }
+.sas-quiet { padding: 0 4px; }
+.waiting .small { font-size: .85rem; max-width: 34em; margin: 6px auto 0; }
