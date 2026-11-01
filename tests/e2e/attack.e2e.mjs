@@ -220,6 +220,12 @@ await scenario('answer stays on screen: closing the ringing pop-up (Back / Esc) 
   const link = await hostBeacon(A, { mode: 'voice' });
   await B.goto(link);
   await B.waitForSelector('.modal button.btn-answer');
+  const aId = (await A.innerText('#my-id')).trim();
+  assert.match(await B.innerText('.modal .caller-id'), new RegExp(aId), 'the ringing screen shows the caller ID');
+  assert.match(await B.innerText('.modal'), /Invite sent at/);
+  await B.hover('.modal button.btn-answer');
+  await B.waitForSelector('#wkn-tip:not([hidden])');
+  assert.match(await B.innerText('#wkn-tip'), /Answer the call/, 'hover info on buttons');
   await B.keyboard.press('Escape'); // like the phone's Back button
   await B.waitForSelector('.incoming button.btn-answer');
   assert.equal(await B.$('dialog.ring-dialog[open]'), null, 'pop-up closed');

@@ -275,3 +275,10 @@ html[data-locked] dialog.ring-dialog { display: none; }
 .waiting .small { font-size: .85rem; max-width: 34em; margin: 6px auto 0; }
 
 .stack.call { padding-bottom: 96px; } /* room above the bottom bar */
+
+/* Hover / press-and-hold info on buttons and links */
+.tip { position: fixed; z-index: 2000; pointer-events: none; padding: 7px 10px; border-radius: 8px; background: #0b1f2e; color: #fff; border: 1px solid #ffffff22;
+  font: 600 .82rem/1.35 system-ui, sans-serif; box-shadow: 0 6px 18px #0006; max-width: 280px; overflow-wrap: anywhere; }
+.tip[hidden] { display: none; }
+.caller-id { font-family: ui-monospace, monospace; font-size: .85rem; color: var(--muted); margin: 2px 0; }
+.invite-old { color: var(--warn, #f59e0b); font-weight: 600; font-size: .9rem; }

@@ -19,6 +19,7 @@ import { LocationSharer, SOSBeacon, playSiren, SHARE_DURATIONS } from './feature
 import { onBeacon, shareToWhatsApp, shareNative, platform, keepAlive, appDownload } from './platform.js';
 import { drawQR } from './ui/qr.js';
 import { makeThumb, isPhoto, photoImg } from './ui/photo.js';
+import { installTips } from './ui/tips.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -62,6 +63,7 @@ async function boot() {
   go('connect');
 
   onBeacon((frag) => receiveBeacon(frag));
+  installTips();
 }
 
 function go(view) {
@@ -309,6 +311,7 @@ function incomingCard() {
     h('div', { class: 'incoming-head' },
       h('div', { class: `ring-pulse ${pic ? 'has-photo' : ''}`, 'aria-hidden': 'true' }, pic ? photoImg(pic, 'ring-photo', '') : null),
       h('div', {}, h('strong', { text: `Incoming ${modeLabel(r.o.payload.mode).toLowerCase()}` }), h('p', { class: 'muted', text: `${r.who} is waiting for you to answer` }))),
+    inviteAgeNote(r.o),
     h('div', { class: 'incoming-actions' },
       h('button', { class: 'btn btn-primary btn-answer btn-xl', type: 'button', text: 'Answer', onclick: () => r.join() }),
       h('button', { class: 'btn btn-ghost', type: 'button', text: 'Decline', onclick: () => { clearRing(); declineCall(r.o, r.who); } }),
@@ -332,6 +335,8 @@ function ringDialog(o, who, contact, join, callerPhoto) {
   return modal(`${modeLabel(o.payload.mode)} from ${contact ? contact.name : o.payload.fromId}`, h('div', { class: 'ring' },
     h('div', { class: `ring-pulse ${pic ? 'has-photo' : ''}`, 'aria-hidden': 'true' }, pic ? photoImg(pic, 'ring-photo', '') : null),
     h('p', {}, 'From ', h('strong', { text: who })),
+    h('p', { class: 'caller-id', text: `Caller ID: ${o.payload.fromId}` }),
+    inviteAgeNote(o),
     h('p', { text: `End-to-end encrypted · up to ${o.payload.max} people · ${lingerLabel(o.payload.linger)}` }),
     h('p', { class: 'muted', text: contact
       ? `Saved contact ✓${saved ? ' — this is the photo you saved' : ''}`
@@ -340,6 +345,16 @@ function ringDialog(o, who, contact, join, callerPhoto) {
     ['Decline', () => { clearRing(); declineCall(o, who); }, 'btn-ghost'],
     ['Block', () => { clearRing(); blockCaller(o, who); }, 'btn-danger'],
   ]);
+}
+
+/** When the invite was sent, with a warning on old ones (people sometimes tap an earlier link
+ *  in the chat and end up in a different call). */
+function inviteAgeNote(o) {
+  const mins = Math.max(0, Math.round((Date.now() - (o.payload.iat || Date.now())) / 60e3));
+  const at = new Date(o.payload.iat || Date.now()).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return mins >= 5
+    ? h('p', { class: 'invite-old', text: `⚠️ This invite was sent ${mins} minutes ago (${at}). If they’ve sent you a newer one, close this and open the newest link, or you may join a different call.` })
+    : h('p', { class: 'muted small', text: `Invite sent at ${at}` });
 }
 
 /** Is a live picture coming through on this stream? */
