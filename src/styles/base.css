@@ -282,3 +282,5 @@ html[data-locked] dialog.ring-dialog { display: none; }
 .tip[hidden] { display: none; }
 .caller-id { font-family: ui-monospace, monospace; font-size: .85rem; color: var(--muted); margin: 2px 0; }
 .invite-old { color: var(--warn, #f59e0b); font-weight: 600; font-size: .9rem; }
+
+.waiting p.answered { color: var(--ok, #22c55e); font-weight: 700; }

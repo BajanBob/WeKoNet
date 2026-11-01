@@ -273,7 +273,18 @@ async function receiveBeacon(input) {
   if (action === 'decline') return declineCall(o, who);
   if (action === 'block') return blockCaller(o, who);
   if (S.ring && S.ring.o.payload.room === o.payload.room) { showRingDialog(); return; } // same invite opened twice
-  if (S.call) return toast('Finish the current call before answering another', 'warn');
+  if (S.call) {
+    if (S.call.payload?.room === o.payload.room) return go('call'); // the same call
+    // Still sitting in an earlier call (often an old one whose other person has gone): ask, don't ignore.
+    const stale = S.peers.size === 0 || [...S.peers.values()].every((p) => p.state && p.state !== 'connected');
+    if (stale) { toast('Left your earlier call to answer this one'); S.call.end(false); await new Promise((r) => setTimeout(r, 300)); }
+    else {
+      return modal('You’re still in another call', h('p', { text: `${who} is calling. Leave your current call and answer?` }), [
+        ['Leave and answer', async () => { S.call?.end(false); await new Promise((r) => setTimeout(r, 300)); receiveBeacon(input); }, 'btn-primary btn-answer'],
+        ['Stay in this call', null, 'btn-ghost'],
+      ]);
+    }
+  }
 
   const join = async () => {
     clearRing();
@@ -436,9 +447,17 @@ async function beaconContact(c, mode) {
 // ============================================================ call session
 async function startCall(beacon, role, mode) {
   const call = new CallSession({ identity: S.identity, beacon, role, iceServers: CONFIG.iceServers, hideIp: S.hideIp });
-  S.call = call; S.role = role; S.peers.clear();
+  S.call = call; S.role = role; S.peers.clear(); S.answered = null;
   call.addEventListener('local-stream', (e) => { S.localStream = e.detail.stream; refresh('call'); });
   call.addEventListener('video-step', (e) => { document.documentElement.dataset.videoStep = e.detail.step; });
+  // Caller's confirmation: the moment the other person answers, before the secure link is up.
+  call.addEventListener('answering', () => {
+    if (S.call !== call) return;
+    S.answered = Date.now();
+    if (role === 'host') toast('They answered ✓ — connecting securely…');
+    refresh('call');
+  });
+  call.addEventListener('other-left', (e) => { if (S.call === call) toast(`The other person left (${e.detail.reason}) — call ended`, 'warn'); });
   call.addEventListener('peer', (e) => {
     const d = e.detail;
     const c = S.contacts.find((x) => x.wid === d.id);
@@ -453,7 +472,7 @@ async function startCall(beacon, role, mode) {
     if (!before && liveVideo(p.stream) && S.call?.mode !== 'video') toast(`${p.name} turned on video — tap Video to show yours`);
     refresh('call');
   });
-  call.addEventListener('peer-left', (e) => { const p = S.peers.get(e.detail.peer); S.peers.delete(e.detail.peer); dropVideo(e.detail.peer); S.map?.remove(e.detail.peer); if (p) toast(`${p.name} left (${e.detail.reason})`); refresh('call'); });
+  call.addEventListener('peer-left', (e) => { const p = S.peers.get(e.detail.peer); S.peers.delete(e.detail.peer); if (!S.peers.size) S.answered = null; dropVideo(e.detail.peer); S.map?.remove(e.detail.peer); if (p) toast(`${p.name} left (${e.detail.reason})`); refresh('call'); });
   call.addEventListener('peer-state', (e) => { const p = S.peers.get(e.detail.peer); if (p && p.state !== e.detail.state) { p.state = e.detail.state; refresh('call'); } });
   call.addEventListener('message', (e) => onPeerMessage(e.detail));
   call.addEventListener('channel-open', (e) => { if (S.photo) call.sendTo(e.detail.peer, 'card', { p: b64u(S.photo) }); });
@@ -712,7 +731,9 @@ const VIEWS = {
         p.verified ? h('span', { class: 'badge ok', text: 'Verified' }) : isVideoCall(p) ? null : h('span', { class: 'badge', text: 'New contact' }))));
     }
     const waiting = S.peers.size === 0 ? h('div', { class: 'waiting' },
-      h('div', { class: 'pulse' }), h('p', { text: S.role === 'host' ? (S.beacon?.sent ? 'Beacon sent ✓ — waiting for them to tap Answer…' : 'Waiting for your contact to open the beacon…') : 'Connecting securely…' }),
+      h('div', { class: 'pulse' }), h('p', { class: S.answered ? 'answered' : null, text: S.answered
+        ? (S.role === 'host' ? 'Answered ✓ — connecting securely…' : 'Answered ✓ — connecting to the caller…')
+        : S.role === 'host' ? (S.beacon?.sent ? 'Beacon sent ✓ — waiting for them to tap Answer…' : 'Waiting for your contact to open the beacon…') : 'Connecting securely…' }),
       S.role === 'host' ? h('p', { class: 'muted small', text: `They will see your ID ${S.identity.id}. If they say they answered but you still see this, they opened an old link: tap “Share beacon again” and ask them to use only the newest one.` }) : null,
       S.role === 'host' && S.beacon ? h('button', { class: 'btn', type: 'button', text: 'Share beacon again', onclick: () => showShare(S.beacon) }) : null) : null;
 

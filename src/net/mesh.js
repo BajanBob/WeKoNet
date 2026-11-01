@@ -176,6 +176,7 @@ export class CallSession extends EventTarget {
       const expect = this.role === 'guest' && this.payload.max === 2 ? this.inviterPub : null;
       const hs = await initiate({ identity: this.identity, room: this.payload.room, expectPeer: expect });
       this.peers.set(other, { hs, role: 'I' });
+      this.emit('answering', { peer: other });
       await this.sig.send(other, hs.hello);
     }
   }
@@ -194,6 +195,7 @@ export class CallSession extends EventTarget {
       const expect = this.role === 'guest' && this.payload.max === 2 ? this.inviterPub : null;
       const r = await respond({ identity: this.identity, room: this.payload.room, hello: msg, expectPeer: expect });
       this.peers.set(from, { hs: r, role: 'R' });
+      this.emit('answering', { peer: from }); // the caller's confirmation: they answered, now connecting
       await this.sig.send(from, r.reply);
       return;
     }
@@ -241,6 +243,10 @@ export class CallSession extends EventTarget {
     pc.onicecandidate = (e) => { if (e.candidate) this.#sendRtc(peerId, p, { ice: e.candidate.toJSON() }); };
     pc.onconnectionstatechange = () => {
       this.emit('peer-state', { peer: peerId, state: pc.connectionState });
+      clearTimeout(p.lostTimer);
+      // A phone that was switched off, lost signal for good or had WeKoNet removed: after 20 s of
+      // silence, treat them as gone instead of leaving a dead call on screen.
+      if (pc.connectionState === 'disconnected') p.lostTimer = setTimeout(() => { if (pc.connectionState !== 'connected') this.#dropPeer(peerId, 'lost connection'); }, 20e3);
       if (pc.connectionState === 'failed') {
         const turn = this.iceServers.some((x) => [].concat(x.urls).some((u) => /^turns?:/.test(u)));
         this.emit('error', { message: turn
@@ -360,8 +366,11 @@ export class CallSession extends EventTarget {
     if (!p) return;
     try { p.pc?.close(); } catch { /* ignore */ }
     p.tx?.destroy(); p.rx?.destroy(); p.sigTx?.destroy(); p.sigRx?.destroy();
+    clearTimeout(p.lostTimer);
     this.peers.delete(peerId);
     this.emit('peer-left', { peer: peerId, reason });
+    // In a one-to-one call the guest only ever talks to the caller: once they're gone, the call is over.
+    if (this.role === 'guest' && this.payload.max === 2 && this.peers.size === 0 && !this.ended) { this.emit('other-left', { reason }); this.end(false); }
   }
 
   /** End the call. `forAll` kills the beacon on the relay for everyone. */

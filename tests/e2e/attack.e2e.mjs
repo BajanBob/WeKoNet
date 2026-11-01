@@ -267,6 +267,29 @@ await scenario('verification: no words prompt on video calls; voice call offers 
   await endAll(C, D);
 });
 
+await scenario('caller sees "Answered ✓"; a new invite during an old call is never ignored; the old call ends when the caller is gone', async () => {
+  const A = await person('A'), B = await person('B');
+  const link = await hostBeacon(A, { mode: 'voice' });
+  await openLink(B, link);
+  await waitToast(A, /They answered/);
+  await B.waitForSelector('.tile:not(.me)', { timeout: 20000 });
+  await A.waitForSelector('.tile:not(.me)', { timeout: 20000 });
+  // Someone else calls B while B is still in A's call: B is asked, not silently ignored.
+  const A2 = await person('A2');
+  const link2 = await hostBeacon(A2, { mode: 'voice' });
+  await B.goto(link2);
+  await B.waitForSelector('.modal >> text=You’re still in another call');
+  await B.click('.modal button:has-text("Leave and answer")');
+  await B.waitForSelector('.modal button.btn-answer');
+  await B.click('.modal button.btn-answer');
+  await A2.waitForSelector('.tile:not(.me)', { timeout: 20000 });
+  assert.match(await B.innerText('.tile:not(.me) figcaption'), new RegExp((await A2.innerText('#my-id')).trim().slice(0, 9)), 'B is now with A2');
+  // A2's phone disappears (WeKoNet closed / phone off): B is not left sitting in a dead call.
+  await A2.ctx.close();
+  await B.waitForFunction(() => !document.querySelector('.tile:not(.me)'), null, { timeout: 45000 });
+  await endAll(A, B);
+});
+
 await scenario('decline link: caller is told at once and the invite dies; nobody gets camera or mic', async () => {
   const A = await person('A'), B = await person('B'), C = await person('C');
   const link = await hostBeacon(A, { mode: 'voice' });
