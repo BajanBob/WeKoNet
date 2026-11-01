@@ -111,16 +111,19 @@ export class CallSession extends EventTarget {
    *  talking to (a cloned voice or a man-in-the-middle can't fake a live face this way). */
   async enableVideo() {
     if (this.local?.getVideoTracks().length) { this.toggleCam(true); this.mode = 'video'; return; }
+    this.emit('video-step', { step: 'camera' });
     const s = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' } });
     const nt = s.getVideoTracks()[0];
-    if (!this.local) this.local = new MediaStream();
-    this.local.addTrack(nt);
-    for (const p of this.peers.values()) {
-      const tr = p.pc?.getTransceivers().find((t) => t.receiver.track.kind === 'video');
-      if (tr) await tr.sender.replaceTrack(nt);
-    }
+    this.local = new MediaStream([...(this.local?.getTracks() || []), nt]);
     this.mode = 'video';
     this.emit('local-stream', { stream: this.local });
+    this.emit('video-step', { step: 'sending' });
+    for (const p of this.peers.values()) {
+      const tr = p.pc?.getTransceivers().find((t) => (t.receiver.track?.kind || t.mid) === 'video' || t.sender.track?.kind === 'video');
+      if (!tr) { this.emit('video-step', { step: 'no-video-channel' }); continue; }
+      await tr.sender.replaceTrack(nt);
+    }
+    this.emit('video-step', { step: 'done' });
   }
 
   async switchCamera() {

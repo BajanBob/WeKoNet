@@ -348,6 +348,7 @@ function liveVideo(st) { return !!st?.getVideoTracks().some((t) => t.readyState 
 function isVideoCall(p) { return S.call?.mode === 'video' || liveVideo(p?.stream); }
 
 async function goVideo(p = null) {
+  document.documentElement.dataset.videoStep = 'start';
   try {
     await S.call.enableVideo();
     if (p) p.videoCheck = true;
@@ -422,6 +423,7 @@ async function startCall(beacon, role, mode) {
   const call = new CallSession({ identity: S.identity, beacon, role, iceServers: CONFIG.iceServers, hideIp: S.hideIp });
   S.call = call; S.role = role; S.peers.clear();
   call.addEventListener('local-stream', (e) => { S.localStream = e.detail.stream; refresh('call'); });
+  call.addEventListener('video-step', (e) => { document.documentElement.dataset.videoStep = e.detail.step; });
   call.addEventListener('peer', (e) => {
     const d = e.detail;
     const c = S.contacts.find((x) => x.wid === d.id);
