@@ -92,8 +92,8 @@ test('full (long) link pasted into the Join box still works', async ({ browser }
   expect(full).toMatch(/#v2\./);
   await B.page.getByLabel('Beacon link').fill(full);
   await B.page.getByRole('button', { name: 'Join', exact: true }).click();
-  // A plain link rings: Answer / Decline / Block.
-  for (const name of ['Answer', 'Decline', 'Block']) await expect(B.page.getByRole('button', { name, exact: true })).toBeVisible();
+  // A plain link rings: Answer / Decline / Block, in the pop-up and on the card that stays on screen.
+  for (const name of ['Answer', 'Decline', 'Block']) { await expect(B.page.getByRole('dialog').getByRole('button', { name, exact: true })).toBeVisible(); await expect(B.page.locator('.incoming').getByRole('button', { name, exact: true })).toBeAttached(); }
   expect([...A.errors, ...B.errors]).toEqual([]);
   await A.ctx.close(); await B.ctx.close();
 });
