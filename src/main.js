@@ -70,6 +70,7 @@ function go(view) {
   const root = $('#view');
   root.replaceChildren(VIEWS[view]());
   if (S.call && view !== 'call') root.prepend(inCallStrip());
+  if (S.ring && !S.call) root.prepend(incomingCard());
   root.focus({ preventScroll: true });
   if (view === 'map') mountMap();
 }
@@ -104,6 +105,7 @@ function showLock() {
     if (await checkPin(input.value, S.pin)) {
       await vault.settings.set('pinFails', 0);
       screen.remove(); delete document.documentElement.dataset.locked; S.hiddenAt = null;
+      if (S.ring && !S.call) { showRingDialog(); go(S.view || 'connect'); } // a call arrived while locked
       return;
     }
     const fails = (await vault.settings.get('pinFails', 0)) + 1;
@@ -268,9 +270,11 @@ async function receiveBeacon(input) {
   }
   if (action === 'decline') return declineCall(o, who);
   if (action === 'block') return blockCaller(o, who);
+  if (S.ring && S.ring.o.payload.room === o.payload.room) { showRingDialog(); return; } // same invite opened twice
   if (S.call) return toast('Finish the current call before answering another', 'warn');
 
   const join = async () => {
+    clearRing();
     const firstRun = !(await vault.settings.get('kept', false)) && S.contacts.length === 0;
     if (firstRun) await vault.settings.set('guest', true);
     return startCall(o, 'guest', o.payload.mode).then(() => go('call')).catch((e) => toast(e.message, 'danger'));
@@ -280,13 +284,52 @@ async function receiveBeacon(input) {
   ringing(o, who, contact, join, callerPhoto);
 }
 
-/** Incoming call screen for a plain link: Answer · Decline · Block. */
+/** Incoming call: a ringing pop-up AND a card that stays on screen with Answer · Decline · Block
+ *  until the person chooses (closing the pop-up with Back never loses the Answer button). */
 function ringing(o, who, contact, join, callerPhoto) {
+  S.ring = { o, who, contact, join, callerPhoto, exp: o.payload.exp };
+  clearTimeout(S.ringTimer);
+  S.ringTimer = setTimeout(() => { if (S.ring?.o === o) { clearRing(); toast('The call invite has expired', 'warn'); } }, Math.max(0, o.payload.exp - Date.now()));
+  go(S.view && S.view !== 'call' ? S.view : 'connect');
+  if (!document.documentElement.dataset.locked) showRingDialog(); // when locked, it rings after the PIN
+}
+
+function clearRing() {
+  clearTimeout(S.ringTimer);
+  S.ring = null;
+  document.querySelector('dialog.ring-dialog')?.remove();
+  if (!S.call) refresh(S.view);
+}
+
+/** The card at the top of the screen while a call is waiting to be answered. */
+function incomingCard() {
+  const r = S.ring;
+  const pic = (r.contact?.photo ? unb64u(r.contact.photo) : null) || r.callerPhoto;
+  return h('section', { class: 'card incoming', role: 'alert' },
+    h('div', { class: 'incoming-head' },
+      h('div', { class: `ring-pulse ${pic ? 'has-photo' : ''}`, 'aria-hidden': 'true' }, pic ? photoImg(pic, 'ring-photo', '') : null),
+      h('div', {}, h('strong', { text: `Incoming ${modeLabel(r.o.payload.mode).toLowerCase()}` }), h('p', { class: 'muted', text: `${r.who} is waiting for you to answer` }))),
+    h('div', { class: 'incoming-actions' },
+      h('button', { class: 'btn btn-primary btn-answer btn-xl', type: 'button', text: 'Answer', onclick: () => r.join() }),
+      h('button', { class: 'btn btn-ghost', type: 'button', text: 'Decline', onclick: () => { clearRing(); declineCall(r.o, r.who); } }),
+      h('button', { class: 'btn btn-danger', type: 'button', text: 'Block', onclick: () => { clearRing(); blockCaller(r.o, r.who); } })));
+}
+
+function showRingDialog() {
+  if (!S.ring || document.querySelector('dialog.ring-dialog')) return;
+  const { o, who, contact, join, callerPhoto } = S.ring;
+  const dlg = ringDialog(o, who, contact, join, callerPhoto);
+  dlg.classList.add('ring-dialog');
+  // Back button / Esc closes only the pop-up: the Answer card stays on the screen.
+  dlg.addEventListener('cancel', () => setTimeout(() => { dlg.remove(); toast('Call still waiting: tap Answer at the top of the screen'); }, 0));
+}
+
+function ringDialog(o, who, contact, join, callerPhoto) {
   // A saved contact's photo is the one YOU saved with their verified identity; a photo
   // from the invite is only what the caller says they look like.
   const saved = contact?.photo ? unb64u(contact.photo) : null;
   const pic = saved || callerPhoto;
-  modal(`${modeLabel(o.payload.mode)} from ${contact ? contact.name : o.payload.fromId}`, h('div', { class: 'ring' },
+  return modal(`${modeLabel(o.payload.mode)} from ${contact ? contact.name : o.payload.fromId}`, h('div', { class: 'ring' },
     h('div', { class: `ring-pulse ${pic ? 'has-photo' : ''}`, 'aria-hidden': 'true' }, pic ? photoImg(pic, 'ring-photo', '') : null),
     h('p', {}, 'From ', h('strong', { text: who })),
     h('p', { text: `End-to-end encrypted · up to ${o.payload.max} people · ${lingerLabel(o.payload.linger)}` }),
@@ -295,8 +338,8 @@ function ringing(o, who, contact, join, callerPhoto) {
       : pic ? 'Photo sent by the caller and signed by their WeKoNet ID. Anyone can use someone else’s picture, so check the security words once connected.'
         : 'Not a saved contact — compare the security words once connected.' })), [
     ['Answer', join, 'btn-primary btn-answer'],
-    ['Decline', () => declineCall(o, who), 'btn-ghost'],
-    ['Block', () => blockCaller(o, who), 'btn-danger'],
+    ['Decline', () => { clearRing(); declineCall(o, who); }, 'btn-ghost'],
+    ['Block', () => { clearRing(); blockCaller(o, who); }, 'btn-danger'],
   ]);
 }
 

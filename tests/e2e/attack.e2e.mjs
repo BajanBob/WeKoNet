@@ -215,6 +215,24 @@ await scenario('caller photo: shown on the ringing screen and call tile, signed,
   await endAll(A, B);
 });
 
+await scenario('answer stays on screen: closing the ringing pop-up (Back / Esc) leaves an Answer button that connects', async () => {
+  const A = await person('A'), B = await person('B');
+  const link = await hostBeacon(A, { mode: 'voice' });
+  await B.goto(link);
+  await B.waitForSelector('.modal button.btn-answer');
+  await B.keyboard.press('Escape'); // like the phone's Back button
+  await B.waitForSelector('.incoming button.btn-answer');
+  assert.equal(await B.$('dialog.ring-dialog[open]'), null, 'pop-up closed');
+  assert.match(await B.innerText('.incoming'), /waiting for you to answer/);
+  await B.click('[data-nav=settings]'); // the Answer card follows to other screens
+  await B.waitForSelector('.incoming button.btn-answer');
+  await shot(B, 'e2e-answer-card');
+  await B.click('.incoming button.btn-answer');
+  await A.waitForFunction(() => document.querySelectorAll('.tile:not(.me)').length >= 1, null, { timeout: 20000 });
+  assert.equal(await B.$('.incoming'), null, 'the card goes away once answered');
+  await endAll(A, B);
+});
+
 await scenario('decline link: caller is told at once and the invite dies; nobody gets camera or mic', async () => {
   const A = await person('A'), B = await person('B'), C = await person('C');
   const link = await hostBeacon(A, { mode: 'voice' });

@@ -224,6 +224,7 @@ html[data-sos="on"] .sos-fab {
 /* app lock */
 html[data-locked] main, html[data-locked] .tabbar, html[data-locked] .toasts,
 html[data-locked] .id-chip, html[data-locked] dialog.modal { visibility: hidden; }
+html[data-locked] dialog.ring-dialog { display: none; }
 .lockscreen {
   position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 24px;
   background: var(--bg, #0b1020);
@@ -253,3 +254,16 @@ html[data-locked] .id-chip, html[data-locked] dialog.modal { visibility: hidden;
 .tile-photo { position: absolute; inset: 0; margin: auto; height: 74%; width: auto; aspect-ratio: 1; border-radius: 50%; object-fit: cover; z-index: 1; border: 2px solid var(--line); }
 .contact .avatar { margin-right: 10px; }
 .photo-card .row { align-items: center; gap: 14px; }
+
+/* Incoming call card: stays at the top of every screen until Answer / Decline / Block. */
+.incoming { border: 2px solid var(--ok, #22c55e); animation: incoming 1.6s ease-in-out infinite; }
+.incoming-head { display: flex; gap: 14px; align-items: center; }
+.incoming-head .ring-pulse { margin: 0; flex: none; }
+.incoming-head p { margin: 2px 0 0; }
+.incoming-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.incoming-actions .btn-answer { flex: 1 1 100%; font-size: 1.15rem; }
+@keyframes incoming { 50% { box-shadow: 0 0 0 6px rgba(34,197,94,.25); } }
+@media (prefers-reduced-motion: reduce) { .incoming { animation: none; } }
+.modal { max-height: 92vh; overflow-y: auto; }
+.ring-dialog .modal-actions { position: sticky; bottom: -20px; background: var(--bg2); padding-bottom: 4px; }
+.ring-dialog .modal-actions .btn-answer { flex: 1 1 100%; order: -1; }
