@@ -25,7 +25,7 @@ async function createBeacon(page, mode) {
 // The shared link rings: Answer / Decline / Block.
 async function joinFromLink(page, link) {
   await page.goto(link);
-  await page.getByRole('button', { name: 'Answer', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Answer', exact: true }).click(); // the ringing pop-up (the Answer card behind it is the backup)
 }
 
 test('chat call: short link, matching security words, message delivered, end for all', async ({ browser }) => {
