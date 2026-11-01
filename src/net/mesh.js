@@ -281,11 +281,11 @@ export class CallSession extends EventTarget {
       // One stream per person holding their audio and video, so turning video on mid-call just works.
       p.remote ||= new MediaStream();
       if (!p.remote.getTracks().includes(e.track)) p.remote.addTrack(e.track);
-      // A fresh stream object each time, so the page re-attaches it (browsers don't always show a
-      // video track added to a stream that is already playing).
-      const changed = () => this.emit('remote-track', { peer: peerId, stream: new MediaStream(p.remote.getTracks()) });
-      e.track.addEventListener('unmute', changed);
-      e.track.addEventListener('mute', changed);
+      // A fresh stream object when a track is added (so the page re-attaches it); the same one when
+      // a video track starts or stops sending (so the tile can switch between picture and photo).
+      p.remoteView = new MediaStream(p.remote.getTracks());
+      const changed = () => this.emit('remote-track', { peer: peerId, stream: p.remoteView });
+      if (kind === 'video') { e.track.addEventListener('unmute', changed); e.track.addEventListener('mute', changed); }
       changed();
     };
   }

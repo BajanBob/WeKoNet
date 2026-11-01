@@ -273,3 +273,5 @@ html[data-locked] dialog.ring-dialog { display: none; }
 .sas-more summary { cursor: pointer; color: var(--muted); font-size: .9rem; }
 .sas-quiet { padding: 0 4px; }
 .waiting .small { font-size: .85rem; max-width: 34em; margin: 6px auto 0; }
+
+.stack.call { padding-bottom: 96px; } /* room above the bottom bar */

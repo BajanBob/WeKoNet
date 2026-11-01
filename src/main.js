@@ -353,7 +353,7 @@ async function goVideo(p = null) {
     if (p) p.videoCheck = true;
     toast('Video on — ask them to tap Video too, so you can see each other');
     refresh('call');
-  } catch { toast('Couldn’t start the camera — allow camera access for WeKoNet and try again', 'warn'); }
+  } catch (e) { document.documentElement.dataset.videoError = String(e?.name || e); toast(`Couldn’t start the camera (${e?.name || 'error'}) — allow camera access for WeKoNet and try again`, 'warn'); }
 }
 
 /** Optional check for NEW contacts on voice and chat calls: see them on video (a cloned voice or
@@ -720,7 +720,7 @@ const VIEWS = {
     const save = [...S.peers.values()].filter((p) => !S.contacts.some((c) => c.wid === p.id)).map((p) =>
       h('button', { class: 'btn btn-sm', type: 'button', text: `Save connection: ${p.name}`, onclick: () => saveContact(p) }));
 
-    return h('div', { class: 'stack call' }, status, ...verify, tiles, waiting, ctl, getAppCard(), save.length ? h('div', { class: 'row wrap save-row' }, save) : null);
+    return h('div', { class: 'stack call' }, status, ...verify, save.length ? h('div', { class: 'row wrap save-row' }, save) : null, tiles, waiting, ctl, getAppCard());
   },
 
   chat() {
