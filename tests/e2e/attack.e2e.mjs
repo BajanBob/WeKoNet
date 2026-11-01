@@ -290,6 +290,17 @@ await scenario('caller sees "Answered ✓"; a new invite during an old call is n
   await endAll(A, B);
 });
 
+await scenario('old invite: the caller has gone (e.g. reinstalled WeKoNet) → the person answering is told, not left waiting', async () => {
+  const A = await person('A'), B = await person('B');
+  const link = await hostBeacon(A, { mode: 'voice' });
+  const aId = (await A.innerText('#my-id')).trim();
+  await A.ctx.close(); // the caller's phone is gone
+  await openLink(B, link);
+  await B.waitForSelector('.modal >> text=The caller isn’t connected', { timeout: 30000 });
+  assert.match(await B.innerText('.modal'), new RegExp(aId));
+  await endAll(B);
+});
+
 await scenario('decline link: caller is told at once and the invite dies; nobody gets camera or mic', async () => {
   const A = await person('A'), B = await person('B'), C = await person('C');
   const link = await hostBeacon(A, { mode: 'voice' });

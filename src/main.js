@@ -458,6 +458,18 @@ async function startCall(beacon, role, mode) {
     refresh('call');
   });
   call.addEventListener('other-left', (e) => { if (S.call === call) toast(`The other person left (${e.detail.reason}) — call ended`, 'warn'); });
+  // Answered an invite but the caller never shows up (usually an old link from before they
+  // reinstalled WeKoNet or made a new call): say so instead of waiting for ever.
+  if (role === 'guest') {
+    setTimeout(() => {
+      if (S.call !== call || S.peers.size || S.answered) return;
+      const when = new Date(beacon.payload.iat).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      call.end(false);
+      modal('The caller isn’t connected', h('div', {},
+        h('p', { text: `This invite is from ${beacon.payload.fromId}, sent at ${when}, but that phone is no longer on the call.` }),
+        h('p', { text: 'It is probably an old invite. Open the newest invite they sent you, or ask them to tap “Share beacon again”. The ID on their screen must match the Caller ID you see when it rings.' })), [['OK', null, 'btn-primary']]);
+    }, 15e3);
+  }
   call.addEventListener('peer', (e) => {
     const d = e.detail;
     const c = S.contacts.find((x) => x.wid === d.id);
