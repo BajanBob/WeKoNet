@@ -37,6 +37,14 @@ export function onBeacon(cb) {
   });
 }
 
+/** Called when WeKoNet comes back to the screen or the network changes (phone woke up, back from WhatsApp…). */
+export function onWake(cb) {
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) cb('visible'); });
+  window.addEventListener('online', () => cb('online'));
+  window.addEventListener('pageshow', () => cb('pageshow'));
+  if (Capacitor.isNativePlatform()) App.addListener('resume', () => cb('resume'));
+}
+
 export function shareToWhatsApp(text) {
   const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
   window.open(url, '_blank', 'noopener,noreferrer');

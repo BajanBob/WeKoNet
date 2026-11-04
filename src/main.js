@@ -16,7 +16,7 @@ import { contactLinks, sealMail, openMail } from './crypto/contact.js';
 import { CallSession, E2EE_MEDIA, declineBeacon } from './net/mesh.js';
 import { MailboxClient, warmRelay, relayRequest } from './net/signaling.js';
 import { LocationSharer, SOSBeacon, playSiren, SHARE_DURATIONS } from './features/geo.js';
-import { onBeacon, shareToWhatsApp, shareNative, platform, keepAlive, appDownload } from './platform.js';
+import { onBeacon, onWake, shareToWhatsApp, shareNative, platform, keepAlive, appDownload } from './platform.js';
 import { drawQR } from './ui/qr.js';
 import { makeThumb, isPhoto, photoImg } from './ui/photo.js';
 import { installTips } from './ui/tips.js';
@@ -64,6 +64,8 @@ async function boot() {
 
   onBeacon((frag) => receiveBeacon(frag));
   installTips();
+  // Back from WhatsApp, screen on again, network back: check the call's relay link at once.
+  onWake(() => S.call?.checkConnection());
 }
 
 function go(view) {
@@ -453,23 +455,30 @@ async function startCall(beacon, role, mode) {
   // Caller's confirmation: the moment the other person answers, before the secure link is up.
   call.addEventListener('answering', () => {
     if (S.call !== call) return;
+    const first = !S.answered;
     S.answered = Date.now();
-    if (role === 'host') toast('They answered ✓ — connecting securely…');
+    if (role === 'host' && first) toast('They answered ✓ — connecting securely…');
     refresh('call');
   });
   call.addEventListener('other-left', (e) => { if (S.call === call) toast(`The other person left (${e.detail.reason}) — call ended`, 'warn'); });
   // Answered an invite but the caller never shows up (usually an old link from before they
   // reinstalled WeKoNet or made a new call): say so instead of waiting for ever.
+  // The caller's phone may simply be busy in WhatsApp sending the invite, so first explain and keep
+  // waiting (it connects the moment they're back); only give up after 3 minutes.
   if (role === 'guest') {
+    S.callerAway = false;
+    setTimeout(() => { if (S.call === call && !S.peers.size && !S.answered) { S.callerAway = true; refresh('call'); } }, 12e3);
     setTimeout(() => {
       if (S.call !== call || S.peers.size || S.answered) return;
       const when = new Date(beacon.payload.iat).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
       call.end(false);
       modal('The caller isn’t connected', h('div', {},
-        h('p', { text: `This invite is from ${beacon.payload.fromId}, sent at ${when}, but that phone is no longer on the call.` }),
-        h('p', { text: 'It is probably an old invite. Open the newest invite they sent you, or ask them to tap “Share beacon again”. The ID on their screen must match the Caller ID you see when it rings.' })), [['OK', null, 'btn-primary']]);
-    }, 15e3);
+        h('p', { text: `This invite is from ${beacon.payload.fromId}, sent at ${when}, but that phone hasn’t come back to the call.` }),
+        h('p', { text: 'Ask them to open WeKoNet on their phone, or to tap “Share beacon again”. If it’s an old invite, open the newest one: the ID on their screen must match the Caller ID you saw when it rang.' })), [['OK', null, 'btn-primary']]);
+    }, 180e3);
   }
+  // Caller: the other person came into the room (opened the invite), before the secure handshake.
+  call.addEventListener('opened', () => { if (S.call === call && role === 'host') { S.answered ||= Date.now(); toast('They opened your invite ✓ — connecting securely…'); refresh('call'); } });
   call.addEventListener('peer', (e) => {
     const d = e.detail;
     const c = S.contacts.find((x) => x.wid === d.id);
@@ -745,7 +754,8 @@ const VIEWS = {
     const waiting = S.peers.size === 0 ? h('div', { class: 'waiting' },
       h('div', { class: 'pulse' }), h('p', { class: S.answered ? 'answered' : null, text: S.answered
         ? (S.role === 'host' ? 'Answered ✓ — connecting securely…' : 'Answered ✓ — connecting to the caller…')
-        : S.role === 'host' ? (S.beacon?.sent ? 'Beacon sent ✓ — waiting for them to tap Answer…' : 'Waiting for your contact to open the beacon…') : 'Connecting securely…' }),
+        : S.role === 'host' ? (S.beacon?.sent ? 'Beacon sent ✓ — waiting for them to tap Answer…' : 'Waiting for your contact to open the beacon…')
+          : S.callerAway ? `Waiting for the caller (${S.call.payload.fromId}). Their phone isn’t on the call right now — maybe still in WhatsApp sending the invite. This connects as soon as they open WeKoNet again.` : 'Connecting securely…' }),
       S.role === 'host' ? h('p', { class: 'muted small', text: `They will see your ID ${S.identity.id}. If they say they answered but you still see this, they opened an old link: tap “Share beacon again” and ask them to use only the newest one.` }) : null,
       S.role === 'host' && S.beacon ? h('button', { class: 'btn', type: 'button', text: 'Share beacon again', onclick: () => showShare(S.beacon) }) : null) : null;
 

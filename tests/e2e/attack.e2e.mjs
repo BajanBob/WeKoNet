@@ -296,9 +296,43 @@ await scenario('old invite: the caller has gone (e.g. reinstalled WeKoNet) → t
   const aId = (await A.innerText('#my-id')).trim();
   await A.ctx.close(); // the caller's phone is gone
   await openLink(B, link);
-  await B.waitForSelector('.modal >> text=The caller isn’t connected', { timeout: 30000 });
-  assert.match(await B.innerText('.modal'), new RegExp(aId));
+  await B.waitForSelector('.waiting >> text=Waiting for the caller', { timeout: 30000 });
+  assert.match(await B.innerText('.waiting'), new RegExp(aId), 'tells them which caller it is waiting for');
   await endAll(B);
+});
+
+await scenario('caller in WhatsApp (app frozen in the background) while the call is answered → connects when they come back', async () => {
+  const A = await person('A'), B = await person('B');
+  const link = await hostBeacon(A, { mode: 'voice' });
+  const cdp = await A.ctx.newCDPSession(A);
+  await cdp.send('Page.setWebLifecycleState', { state: 'frozen' }); // like Android pausing WeKoNet behind WhatsApp
+  await openLink(B, link);
+  await sleep(20000);
+  await cdp.send('Page.setWebLifecycleState', { state: 'active' }); // back to WeKoNet
+  await A.waitForSelector('.tile:not(.me)', { timeout: 30000 });
+  await B.waitForSelector('.tile:not(.me)', { timeout: 30000 });
+  await endAll(A, B);
+});
+
+await scenario('caller\'s connection silently dies (phone lost signal: no close, relay still thinks it is there) → heartbeat notices, rejoins, call connects', async () => {
+  const A = await person('A'), B = await person('B');
+  let n = 0, deaf = false;
+  // Every relay connection of A goes through this proxy; the first one can be made "deaf":
+  // messages vanish both ways but nothing is ever closed (a half-open socket).
+  await A.routeWebSocket(/\/ws$/, (ws) => {
+    const first = n++ === 0;
+    const server = ws.connectToServer();
+    ws.onMessage((m) => { if (!(first && deaf)) server.send(m); });
+    server.onMessage((m) => { if (!(first && deaf)) ws.send(m); });
+    if (first) { ws.onClose(() => {}); server.onClose(() => {}); } // never pass on a close: the relay keeps the dead one
+  });
+  const link = await hostBeacon(A, { mode: 'voice' });
+  deaf = true;
+  await openLink(B, link);
+  await A.waitForSelector('.tile:not(.me)', { timeout: 45000 });
+  await B.waitForSelector('.tile:not(.me)', { timeout: 30000 });
+  assert.ok(n >= 2, 'A reconnected to the relay');
+  await endAll(A, B);
 });
 
 await scenario('decline link: caller is told at once and the invite dies; nobody gets camera or mic', async () => {

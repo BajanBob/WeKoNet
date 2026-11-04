@@ -216,6 +216,13 @@ function createCore() {
         if (!r.started && Date.now() > r.exp) { dropRoom(m.room); return c.send({ op: 'error', code: 'beacon-expired' }); }
         if (r.started && Date.now() > r.deadline && r.linger !== 'end') return c.send({ op: 'error', code: 'beacon-expired' });
         if (c.room) leaveRoom(c);
+        // Coming back after a dead connection: drop our old, silent connection right away instead of
+        // waiting up to a minute for the heartbeat (otherwise a 2-person room looks full).
+        if (okId(m.was, 8, 16) && r.peers.has(m.was) && r.peers.get(m.was) !== c) {
+          const old = r.peers.get(m.was);
+          leaveRoom(old);
+          old.close(4000);
+        }
         return joinRoom(c, m.room, r);
       }
       case 'signal': {

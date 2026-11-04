@@ -96,3 +96,28 @@ test('relay: short-link stash holds ciphertext until expiry, rejects bad input',
   assert.equal((await B.next()).code, 'bad-request');
   A.close(); B.close();
 });
+
+test('relay: a caller whose connection died silently can come straight back (was = old peer id), even into a full 2-person room', async () => {
+  const id = await generateIdentity();
+  const b = await createBeacon({ identity: id, signalUrl: url, maxPeers: 2 });
+  const A = await client(); // caller's first connection — goes "deaf" (never closed)
+  A.send({ op: 'create', room: b.keys.roomTag, proof: b.keys.joinProof, max: 2, linger: 'end', exp: b.payload.exp });
+  const ja = await A.next();
+  const o = await openBeacon(b.link);
+  const B = await client(); B.send({ op: 'join', room: o.keys.roomTag, proof: o.keys.joinProof });
+  const jb = await B.next(); assert.deepEqual(jb.peers, [ja.peer]);
+  // Without `was` the room is full (dead A + B).
+  const X = await client(); X.send({ op: 'join', room: b.keys.roomTag, proof: b.keys.joinProof });
+  assert.equal((await X.next()).code, 'room-full');
+  // With `was` the dead connection is replaced and B is told: old one left, new one joined.
+  const A2 = await client(); A2.send({ op: 'join', room: b.keys.roomTag, proof: b.keys.joinProof, was: ja.peer });
+  const j2 = await A2.next(); assert.equal(j2.op, 'joined'); assert.deepEqual(j2.peers, [jb.peer]);
+  const seen = [await B.next(), await B.next()].map((m) => m.op).sort();
+  assert.deepEqual(seen, ['peer-joined', 'peer-left']);
+  // A peer id from outside the room changes nothing.
+  const Y = await client(); Y.send({ op: 'join', room: b.keys.roomTag, proof: b.keys.joinProof, was: 'AAAAAAAAAAA' });
+  assert.equal((await Y.next()).code, 'room-full');
+  // And the relay answers pings (the app's own heartbeat).
+  A2.send({ op: 'ping' }); assert.equal((await A2.next()).op, 'pong');
+  for (const c of [A, B, X, A2, Y]) c.close();
+});

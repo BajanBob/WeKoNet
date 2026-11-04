@@ -42,6 +42,8 @@ export class CallSession extends EventTarget {
     await this.setMedia(mode);
     const sig = (this.sig = new Signaling(this.payload.sig, this.beacon.keys));
     sig.addEventListener('joined', (e) => this.#onJoined(e.detail));
+    // The relay says someone came into the room (they opened the invite and answered).
+    sig.addEventListener('peer-joined', (e) => this.emit('opened', { peer: e.detail.peer }));
     sig.addEventListener('peer-left', (e) => {
       // The relay only lost *their* relay connection (phone switched network, app in
       // background…). If our direct encrypted link is up, the call carries on.
@@ -103,6 +105,9 @@ export class CallSession extends EventTarget {
     }
   }
 
+  /** The app came back to the screen (or the network changed): make sure we're still in the room. */
+  checkConnection() { if (!this.ended) { if (this.sig?.ws) this.sig.check(5e3); else this.#reconnect(); } }
+
   toggleMic(on) { this.local?.getAudioTracks().forEach((t) => { t.enabled = on; }); }
   toggleCam(on) { this.local?.getVideoTracks().forEach((t) => { t.enabled = on; }); }
 
@@ -148,7 +153,7 @@ export class CallSession extends EventTarget {
       await this.sig.connect({ maxWaitMs: 120e3 });
       if (this.ended) return;
       this.rejoined = true;
-      this.sig.join(); // both sides re-enter with the beacon's join proof
+      this.sig.join(this.me); // re-enter with the beacon's join proof, replacing our dead old connection
     } catch (e) {
       if (this.peers.size === 0) { this.emit('error', { message: e.message }); this.failed = true; this.end(false); }
     } finally { this.reconnecting = false; }
@@ -369,8 +374,10 @@ export class CallSession extends EventTarget {
     clearTimeout(p.lostTimer);
     this.peers.delete(peerId);
     this.emit('peer-left', { peer: peerId, reason });
-    // In a one-to-one call the guest only ever talks to the caller: once they're gone, the call is over.
-    if (this.role === 'guest' && this.payload.max === 2 && this.peers.size === 0 && !this.ended) { this.emit('other-left', { reason }); this.end(false); }
+    // In a one-to-one call the guest only ever talks to the caller: once a caller we were actually
+    // connected to is gone, the call is over. (A caller whose phone just dropped off the relay before
+    // the call connected comes back with a new connection, so don't end on that.)
+    if (p.session && this.role === 'guest' && this.payload.max === 2 && this.peers.size === 0 && !this.ended) { this.emit('other-left', { reason }); this.end(false); }
   }
 
   /** End the call. `forAll` kills the beacon on the relay for everyone. */

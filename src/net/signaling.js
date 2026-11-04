@@ -31,10 +31,17 @@ export class Signaling extends EventTarget {
       ws.onopen = () => {
         open = true; this.ws = ws;
         for (const m of this.pending.splice(0)) ws.send(m);
+        this.#startHeartbeat(ws);
         resolve();
       };
       ws.onerror = () => { if (!open) reject(new Error('relay unreachable')); };
-      ws.onclose = () => { if (open) this.dispatchEvent(new CustomEvent('closed')); else reject(new Error('relay closed')); };
+      ws.onclose = () => {
+        this.#stopHeartbeat(ws);
+        if (!open || ws.dead) return open ? undefined : reject(new Error('relay closed'));
+        ws.dead = true;
+        if (this.ws === ws) this.ws = null;
+        this.dispatchEvent(new CustomEvent('closed'));
+      };
       let chain = Promise.resolve(); // keep relay messages in order
       ws.onmessage = (e) => {
         chain = chain.then(() => this.#onMessage(e.data)).catch((err) => this.#emit('warning', { message: err.message }));
@@ -43,6 +50,32 @@ export class Signaling extends EventTarget {
   }
 
   #emit(type, detail) { this.dispatchEvent(new CustomEvent(type, { detail })); }
+
+  // ---------- liveness ----------
+  // A phone that goes to the background, loses signal or switches network can be left with a
+  // socket that looks open but is dead: nothing arrives and no "close" ever comes. The relay
+  // then drops us from the room, the other person answers into an empty room, and we would
+  // wait for ever. So we ping the relay ourselves and reconnect as soon as a pong is missing.
+  #startHeartbeat(ws) {
+    this.#stopHeartbeat(ws);
+    ws.hb = setInterval(() => this.check(), Signaling.PING_EVERY_MS);
+  }
+  #stopHeartbeat(ws) { clearInterval(ws?.hb); clearTimeout(ws?.pongTimer); }
+  /** Make sure the relay connection is really alive (call it when the app comes back to the screen). */
+  check(timeoutMs = Signaling.PONG_TIMEOUT_MS) {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== 1 || ws.pongTimer) return;
+    ws.pongTimer = setTimeout(() => this.#declareDead(ws), timeoutMs);
+    try { ws.send(JSON.stringify({ op: 'ping' })); } catch { this.#declareDead(ws); }
+  }
+  #declareDead(ws) {
+    if (ws.dead) return;
+    ws.dead = true;
+    this.#stopHeartbeat(ws);
+    if (this.ws === ws) this.ws = null;
+    try { ws.close(); } catch { /* already gone */ }
+    this.dispatchEvent(new CustomEvent('closed'));
+  }
 
   raw(obj) {
     const s = JSON.stringify(obj);
@@ -53,7 +86,8 @@ export class Signaling extends EventTarget {
     this.raw({ op: 'create', room: this.keys.roomTag, proof: this.keys.joinProof, max, linger, exp });
   }
 
-  join() { this.raw({ op: 'join', room: this.keys.roomTag, proof: this.keys.joinProof }); }
+  /** `was`: our previous peer id in this room, so the relay can drop our dead old connection at once. */
+  join(was = null) { this.raw({ op: 'join', room: this.keys.roomTag, proof: this.keys.joinProof, ...(was ? { was } : {}) }); }
 
   async send(to, obj) {
     const aad = lp(this.keys.roomTag, this.peer, to);
@@ -67,7 +101,9 @@ export class Signaling extends EventTarget {
 
   async #onMessage(text) {
     const m = JSON.parse(text);
+    if (this.ws) { clearTimeout(this.ws.pongTimer); this.ws.pongTimer = null; } // anything from the relay proves the link is alive
     switch (m.op) {
+      case 'pong': return undefined;
       case 'joined': this.peer = m.peer; return this.#emit('joined', m);
       case 'peer-joined': return this.#emit('peer-joined', m);
       case 'peer-left': return this.#emit('peer-left', m);
@@ -85,6 +121,9 @@ export class Signaling extends EventTarget {
     }
   }
 }
+
+Signaling.PING_EVERY_MS = 10e3;
+Signaling.PONG_TIMEOUT_MS = 8e3;
 
 export const relayHost = (url) => { try { return new URL(url).host; } catch { return url; } };
 
