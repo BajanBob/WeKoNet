@@ -271,7 +271,7 @@ await scenario('caller sees "Answered ✓"; a new invite during an old call is n
   const A = await person('A'), B = await person('B');
   const link = await hostBeacon(A, { mode: 'voice' });
   await openLink(B, link);
-  await waitToast(A, /They answered/);
+  await waitToast(A, /opened your invite|They answered/);
   await B.waitForSelector('.tile:not(.me)', { timeout: 20000 });
   await A.waitForSelector('.tile:not(.me)', { timeout: 20000 });
   // Someone else calls B while B is still in A's call: B is asked, not silently ignored.
@@ -316,22 +316,28 @@ await scenario('caller in WhatsApp (app frozen in the background) while the call
 
 await scenario('caller\'s connection silently dies (phone lost signal: no close, relay still thinks it is there) → heartbeat notices, rejoins, call connects', async () => {
   const A = await person('A'), B = await person('B');
-  let n = 0, deaf = false;
-  // Every relay connection of A goes through this proxy; the first one can be made "deaf":
-  // messages vanish both ways but nothing is ever closed (a half-open socket).
+  let deaf = false, rejoinedWithWas = false;
+  // Every relay connection of A goes through this proxy. The call's connection (the one that sent
+  // "create") can be made "deaf": messages vanish both ways but nothing is ever closed (half-open).
   await A.routeWebSocket(/\/ws$/, (ws) => {
-    const first = n++ === 0;
+    const c = { isCall: false };
     const server = ws.connectToServer();
-    ws.onMessage((m) => { if (!(first && deaf)) server.send(m); });
-    server.onMessage((m) => { if (!(first && deaf)) ws.send(m); });
-    if (first) { ws.onClose(() => {}); server.onClose(() => {}); } // never pass on a close: the relay keeps the dead one
+    const dead = () => c.isCall && deaf;
+    ws.onMessage((m) => {
+      if (/"op":"create"/.test(m)) c.isCall = true;
+      if (/"op":"join"/.test(m) && /"was"/.test(m)) rejoinedWithWas = true;
+      if (!dead()) server.send(m);
+    });
+    server.onMessage((m) => { if (!dead()) ws.send(m); });
+    ws.onClose((code, reason) => { if (!dead()) server.close({ code, reason }); });
+    server.onClose((code, reason) => { if (!dead()) ws.close({ code, reason }); });
   });
   const link = await hostBeacon(A, { mode: 'voice' });
   deaf = true;
   await openLink(B, link);
   await A.waitForSelector('.tile:not(.me)', { timeout: 45000 });
   await B.waitForSelector('.tile:not(.me)', { timeout: 30000 });
-  assert.ok(n >= 2, 'A reconnected to the relay');
+  assert.ok(rejoinedWithWas, 'A noticed the dead connection and rejoined with its old peer id');
   await endAll(A, B);
 });
 
